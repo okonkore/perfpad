@@ -45,6 +45,8 @@ async function apiResponse(request, url) {
   try {
     if (!kv) throw httpError(503, "Deno KVが有効ではありません。Deno Deployの起動設定でKVを有効にしてください。");
 
+    if (url.pathname === "/api/debug") return json(await debugKv());
+
     if (url.pathname === "/api/layouts") {
       if (request.method === "GET") return json(await listLayouts());
       if (request.method === "POST") return json(await createLayout(await readJson(request)), { status: 201 });
@@ -92,10 +94,10 @@ async function createLayout(input) {
     createdAt: now,
     updatedAt: now,
   };
-  await kv.atomic()
+  await commitKv(kv.atomic()
     .set(["layouts", saved.id], saved)
-    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved))
-    .commit();
+    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved)));
+  await verifyLayoutSaved(saved.id);
   return saved;
 }
 
@@ -109,18 +111,28 @@ async function updateLayout(id, input) {
     items: layout.items,
     updatedAt: new Date().toISOString(),
   };
-  await kv.atomic()
+  await commitKv(kv.atomic()
     .set(["layouts", id], saved)
-    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved))
-    .commit();
+    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved)));
+  await verifyLayoutSaved(saved.id);
   return saved;
 }
 
 async function deleteLayout(id) {
-  await kv.atomic()
+  await commitKv(kv.atomic()
     .delete(["layouts", id])
-    .set(layoutIndexKey, removeLayoutSummary(await getLayoutIndex(), id))
-    .commit();
+    .set(layoutIndexKey, removeLayoutSummary(await getLayoutIndex(), id)));
+}
+
+async function commitKv(operation) {
+  const result = await operation.commit();
+  if (!result.ok) throw httpError(500, "Deno KVへの保存に失敗しました。");
+  return result;
+}
+
+async function verifyLayoutSaved(id) {
+  const entry = await kv.get(["layouts", id], { consistency: "strong" });
+  if (!entry.value) throw httpError(500, "保存確認に失敗しました。Deno KVが永続化されていない可能性があります。");
 }
 
 async function getLayoutIndex() {
@@ -145,6 +157,20 @@ function layoutSummary(layout) {
     itemCount: layout.items?.length || 0,
     updatedAt: layout.updatedAt,
     createdAt: layout.createdAt,
+  };
+}
+
+async function debugKv() {
+  let storedLayoutCount = 0;
+  for await (const _entry of kv.list({ prefix: ["layouts"] }, { consistency: "strong" })) {
+    storedLayoutCount += 1;
+  }
+  const index = await getLayoutIndex();
+  return {
+    kvAvailable: Boolean(kv),
+    indexedLayoutCount: index.layouts?.length || 0,
+    storedLayoutCount,
+    now: new Date().toISOString(),
   };
 }
 
