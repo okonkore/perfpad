@@ -253,7 +253,7 @@ function normalizeState(input) {
   const items = (input.items || [])
     .map((item) => normalizeItem(item, board))
     .filter(Boolean);
-  return { board, items, zoom: clamp(Number(input.zoom) || 1, 0.7, 6) };
+  return { board, items, zoom: clamp(Number(input.zoom) || 1, 0.7, 24) };
 }
 
 function normalizeDisabledHoles(value, board) {
@@ -546,7 +546,7 @@ function resizeCanvas() {
 
 function setZoom(value, options = {}) {
   const min = Number(els.zoom.min) || 0.7;
-  const max = Number(els.zoom.max) || 6;
+  const max = Number(els.zoom.max) || 24;
   state.zoom = clamp(Number(value) || 1, min, max);
   els.zoom.value = state.zoom;
   if (options.save !== false) save();
@@ -558,7 +558,7 @@ function updateView() {
   const rows = state.board.rows - 1;
   const edgePadding = view.width < 520 ? 132 : view.width < 820 ? 112 : 96;
   const minCell = view.width < 520 ? 5 : 10;
-  const maxCell = view.width < 520 ? 34 : view.width < 820 ? 64 : 120;
+  const maxCell = Number.POSITIVE_INFINITY;
   const baseCell = Math.min((view.width - edgePadding) / Math.max(cols, 1), (view.height - 96) / Math.max(rows, 1), 34);
   view.cell = clamp(baseCell * state.zoom, minCell, maxCell);
   view.originX = Math.round((view.width - cols * view.cell) / 2);
