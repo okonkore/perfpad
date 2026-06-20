@@ -6,7 +6,7 @@ const staticFiles = new Map([
 ]);
 
 const fileCache = new Map();
-const kv = await Deno.openKv();
+const kv = typeof Deno.openKv === "function" ? await Deno.openKv() : null;
 const maxRequestBytes = 2_000_000;
 
 Deno.serve(async (request) => {
@@ -42,6 +42,8 @@ async function readStaticFile(path) {
 
 async function apiResponse(request, url) {
   try {
+    if (!kv) throw httpError(503, "Deno KVが有効ではありません。Deno Deployの起動設定でKVを有効にしてください。");
+
     if (url.pathname === "/api/layouts") {
       if (request.method === "GET") return json(await listLayouts());
       if (request.method === "POST") return json(await createLayout(await readJson(request)), { status: 201 });
