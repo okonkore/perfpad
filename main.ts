@@ -1,7 +1,7 @@
 const staticFiles = new Map([
   ["/", { path: "index.html", contentType: "text/html; charset=utf-8" }],
   ["/index.html", { path: "index.html", contentType: "text/html; charset=utf-8" }],
-  ["/app.js", { path: "app.js", contentType: "application/javascript; charset=utf-8" }],
+  ["/client.js", { path: "client.js", contentType: "application/javascript; charset=utf-8" }],
   ["/styles.css", { path: "styles.css", contentType: "text/css; charset=utf-8" }],
 ]);
 
