@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <title>ユニバーサル基板レイアウト</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>ユニバーサル基板レイアウト</h1>
+            <p id="projectMeta">30 x 20 holes / 2.54 mm</p>
+          </div>
+        </div>
+        <div class="top-actions" role="toolbar" aria-label="ファイル操作">
+          <button class="icon-button" id="undoBtn" title="元に戻す" aria-label="元に戻す">
+            <span class="icon undo"></span>
+          </button>
+          <button class="icon-button" id="redoBtn" title="やり直す" aria-label="やり直す">
+            <span class="icon redo"></span>
+          </button>
+          <button class="icon-button" id="exportPngBtn" title="PNGを書き出す" aria-label="PNGを書き出す">
+            <span class="icon image"></span>
+          </button>
+          <button class="icon-button" id="exportJsonBtn" title="JSONを書き出す" aria-label="JSONを書き出す">
+            <span class="icon download"></span>
+          </button>
+          <button class="icon-button" id="exportConnectionsBtn" title="接続リストを書き出す" aria-label="接続リストを書き出す">
+            <span class="icon text-file"></span>
+          </button>
+          <button class="icon-button" id="exportPartsBtn" title="部品リストを書き出す" aria-label="部品リストを書き出す">
+            <span class="icon parts-list"></span>
+          </button>
+          <button class="icon-button" id="exportPartsCsvBtn" title="部品リストCSVを書き出す" aria-label="部品リストCSVを書き出す">
+            <span class="icon sheet"></span>
+          </button>
+          <button class="icon-button" id="importJsonBtn" title="JSONを読み込む" aria-label="JSONを読み込む">
+            <span class="icon upload"></span>
+          </button>
+          <button class="icon-button danger" id="clearBtn" title="全削除" aria-label="全削除">
+            <span class="icon trash"></span>
+          </button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden />
+        </div>
+      </header>
+
+      <aside class="sidebar left-panel" aria-label="設計ツール">
+        <section class="panel-section">
+          <div class="section-title">基板</div>
+          <div class="board-controls">
+            <label>
+              <span>横</span>
+              <input id="colsInput" type="number" min="8" max="80" step="1" />
+            </label>
+            <label>
+              <span>縦</span>
+              <input id="rowsInput" type="number" min="8" max="60" step="1" />
+            </label>
+            <label>
+              <span>倍率</span>
+              <input id="zoomInput" type="range" min="0.7" max="2.2" step="0.05" />
+            </label>
+            <label class="toggle-row">
+              <input id="labelToggle" type="checkbox" />
+              <span>座標</span>
+            </label>
+          </div>
+          <div class="board-extra-controls">
+            <div class="board-theme-row" id="boardThemeSwatches" aria-label="基板色"></div>
+            <button class="board-settings-button" id="openHoleSettingsBtn" type="button">穴設定</button>
+          </div>
+          <div class="display-controls" id="displayControls" aria-label="表示設定">
+            <div class="display-control-row">
+              <span>配線</span>
+              <div class="segmented display-mode-switch" role="group" aria-label="配線表示">
+                <button class="active" type="button" data-display-target="wires" data-display-mode="on">ON</button>
+                <button type="button" data-display-target="wires" data-display-mode="dim">半透明</button>
+                <button type="button" data-display-target="wires" data-display-mode="off">OFF</button>
+              </div>
+            </div>
+            <div class="display-control-row">
+              <span>素子</span>
+              <div class="segmented display-mode-switch" role="group" aria-label="素子表示">
+                <button type="button" data-display-target="parts" data-display-mode="on">ON</button>
+                <button class="active" type="button" data-display-target="parts" data-display-mode="dim">半透明</button>
+                <button type="button" data-display-target="parts" data-display-mode="off">OFF</button>
+              </div>
+            </div>
+            <div class="display-control-row">
+              <span>名前</span>
+              <div class="segmented display-mode-switch" role="group" aria-label="名前ラベル表示">
+                <button class="active" type="button" data-display-target="labels" data-display-mode="on">ON</button>
+                <button type="button" data-display-target="labels" data-display-mode="dim">半透明</button>
+                <button type="button" data-display-target="labels" data-display-mode="off">OFF</button>
+              </div>
+            </div>
+          </div>
+          <div class="segmented grab-mode-switch" id="grabModeSwitch" role="group" aria-label="掴む対象">
+            <button class="active" type="button" data-grab-mode="auto" title="自動で掴む対象を選ぶ">自動</button>
+            <button type="button" data-grab-mode="parts" title="素子だけを掴む">素子</button>
+            <button type="button" data-grab-mode="wires" title="配線だけを掴む">配線</button>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-title">ツール</div>
+          <div class="tool-grid" id="toolGrid" role="toolbar" aria-label="配置ツール">
+            <button class="tool-button active" data-tool="select" title="選択" aria-label="選択">
+              <span class="tool-icon pointer"></span><span>選択</span>
+            </button>
+            <button class="tool-button" data-tool="wire" title="配線" aria-label="配線">
+              <span class="tool-icon wire"></span><span>配線</span>
+            </button>
+            <button class="tool-button" data-tool="resistor" title="抵抗" aria-label="抵抗">
+              <span class="tool-icon resistor"></span><span>抵抗</span>
+            </button>
+            <button class="tool-button" data-tool="capacitor" title="コンデンサ" aria-label="コンデンサ">
+              <span class="tool-icon capacitor"></span><span>C</span>
+            </button>
+            <button class="tool-button" data-tool="led" title="LED" aria-label="LED">
+              <span class="tool-icon led"></span><span>LED</span>
+            </button>
+            <button class="tool-button" data-tool="ic" title="DIP IC" aria-label="DIP IC">
+              <span class="tool-icon chip"></span><span>IC</span>
+            </button>
+            <button class="tool-button" data-tool="header" title="ピンヘッダ" aria-label="ピンヘッダ">
+              <span class="tool-icon header"></span><span>ヘッダ</span>
+            </button>
+            <button class="tool-button" data-tool="label" title="ラベル" aria-label="ラベル">
+              <span class="tool-icon text"></span><span>ラベル</span>
+            </button>
+            <button class="tool-button" data-tool="cut" title="カットマーク" aria-label="カットマーク">
+              <span class="tool-icon cut"></span><span>カット</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-title">配線色</div>
+          <div class="swatch-row" id="wireSwatches" aria-label="配線色"></div>
+          <div class="segmented" id="layerSwitch" role="group" aria-label="配線レイヤー">
+            <button class="active" data-layer="top">部品面</button>
+            <button data-layer="bottom">はんだ面</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="canvas-stage">
+          <canvas id="boardCanvas" aria-label="基板レイアウトキャンバス"></canvas>
+          <div class="floating-wire-panel" id="wirePanel" hidden>
+            <button id="finishWireBtn">確定</button>
+            <button id="cancelWireBtn">取消</button>
+          </div>
+        </div>
+        <div class="statusbar">
+          <span id="cursorStatus">x: -, y: -</span>
+          <span id="layoutStatus">0 items</span>
+          <span id="selectionStatus">未選択</span>
+        </div>
+      </main>
+
+      <nav class="mobile-panel-tabs" aria-label="モバイルパネル">
+        <button class="active" type="button" data-mobile-panel="tools">ツール</button>
+        <button type="button" data-mobile-panel="inspector">インスペクタ</button>
+      </nav>
+
+      <aside class="sidebar right-panel" aria-label="インスペクタ">
+        <section class="panel-section">
+          <div class="section-title">インスペクタ</div>
+          <div id="inspector"></div>
+        </section>
+      </aside>
+    </div>
+
+    <div class="settings-overlay" id="holeSettings" role="dialog" aria-modal="true" aria-labelledby="holeSettingsTitle" hidden>
+      <div class="settings-dialog">
+        <div class="settings-header">
+          <h2 id="holeSettingsTitle">穴の有効/無効</h2>
+          <button class="action-button" id="closeHoleSettingsBtn" type="button">閉じる</button>
+        </div>
+        <div class="hole-settings-toolbar">
+          <button class="action-button" id="enableAllHolesBtn" type="button">全有効</button>
+          <button class="action-button" id="invertHolesBtn" type="button">反転</button>
+          <span id="holeMaskStatus">0 disabled</span>
+        </div>
+        <canvas id="holeMaskCanvas" aria-label="穴の有効無効設定"></canvas>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
