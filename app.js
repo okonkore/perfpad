@@ -8,6 +8,7 @@ const staticFiles = new Map([
 const fileCache = new Map();
 const kv = typeof Deno.openKv === "function" ? await Deno.openKv() : null;
 const maxRequestBytes = 2_000_000;
+const layoutIndexKey = ["layoutIndex"];
 
 Deno.serve(async (request) => {
   const url = new URL(request.url);
@@ -68,17 +69,8 @@ async function apiResponse(request, url) {
 }
 
 async function listLayouts() {
-  const layouts = [];
-  for await (const entry of kv.list({ prefix: ["layouts"] })) {
-    const value = entry.value;
-    layouts.push({
-      id: value.id,
-      name: value.name,
-      itemCount: value.items?.length || 0,
-      updatedAt: value.updatedAt,
-      createdAt: value.createdAt,
-    });
-  }
+  const index = await getLayoutIndex();
+  const layouts = index.layouts || [];
   layouts.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   return { layouts };
 }
@@ -100,7 +92,10 @@ async function createLayout(input) {
     createdAt: now,
     updatedAt: now,
   };
-  await kv.set(["layouts", saved.id], saved);
+  await kv.atomic()
+    .set(["layouts", saved.id], saved)
+    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved))
+    .commit();
   return saved;
 }
 
@@ -114,12 +109,43 @@ async function updateLayout(id, input) {
     items: layout.items,
     updatedAt: new Date().toISOString(),
   };
-  await kv.set(["layouts", id], saved);
+  await kv.atomic()
+    .set(["layouts", id], saved)
+    .set(layoutIndexKey, upsertLayoutSummary(await getLayoutIndex(), saved))
+    .commit();
   return saved;
 }
 
 async function deleteLayout(id) {
-  await kv.delete(["layouts", id]);
+  await kv.atomic()
+    .delete(["layouts", id])
+    .set(layoutIndexKey, removeLayoutSummary(await getLayoutIndex(), id))
+    .commit();
+}
+
+async function getLayoutIndex() {
+  const entry = await kv.get(layoutIndexKey, { consistency: "strong" });
+  return entry.value && Array.isArray(entry.value.layouts) ? entry.value : { layouts: [] };
+}
+
+function upsertLayoutSummary(index, layout) {
+  const summary = layoutSummary(layout);
+  const layouts = [summary, ...(index.layouts || []).filter((item) => item.id !== layout.id)];
+  return { layouts };
+}
+
+function removeLayoutSummary(index, id) {
+  return { layouts: (index.layouts || []).filter((item) => item.id !== id) };
+}
+
+function layoutSummary(layout) {
+  return {
+    id: layout.id,
+    name: layout.name,
+    itemCount: layout.items?.length || 0,
+    updatedAt: layout.updatedAt,
+    createdAt: layout.createdAt,
+  };
 }
 
 function normalizeLayout(input) {
