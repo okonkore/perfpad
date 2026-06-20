@@ -19,6 +19,7 @@ const els = {
   clear: document.querySelector("#clearBtn"),
   exportPng: document.querySelector("#exportPngBtn"),
   exportJson: document.querySelector("#exportJsonBtn"),
+  cloudLayoutsButton: document.querySelector("#cloudLayoutsBtn"),
   exportConnections: document.querySelector("#exportConnectionsBtn"),
   exportParts: document.querySelector("#exportPartsBtn"),
   exportPartsCsv: document.querySelector("#exportPartsCsvBtn"),
@@ -38,9 +39,17 @@ const els = {
   invertHoles: document.querySelector("#invertHolesBtn"),
   holeMaskCanvas: document.querySelector("#holeMaskCanvas"),
   holeMaskStatus: document.querySelector("#holeMaskStatus"),
+  cloudLayouts: document.querySelector("#cloudLayouts"),
+  closeCloudLayouts: document.querySelector("#closeCloudLayoutsBtn"),
+  cloudLayoutName: document.querySelector("#cloudLayoutName"),
+  saveCloudLayout: document.querySelector("#saveCloudLayoutBtn"),
+  refreshCloudLayouts: document.querySelector("#refreshCloudLayoutsBtn"),
+  cloudLayoutStatus: document.querySelector("#cloudLayoutStatus"),
+  cloudLayoutList: document.querySelector("#cloudLayoutList"),
 };
 
 const storageKey = "universal-board-layout-v1";
+const cloudLayoutKey = "universal-board-layout-cloud-id";
 const wireColors = ["#e43d30", "#276ef1", "#24a148", "#f59e0b", "#8b5cf6", "#1f2937"];
 const boardThemes = {
   green: {
@@ -2755,6 +2764,163 @@ function exportJson() {
   downloadBlob(blob, "universal-board-layout.json");
 }
 
+function currentLayoutPayload(name) {
+  return {
+    name,
+    board: state.board,
+    items: state.items,
+  };
+}
+
+function defaultCloudLayoutName() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(
+    now.getHours(),
+  ).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return `レイアウト ${stamp}`;
+}
+
+function openCloudLayouts() {
+  els.cloudLayouts.hidden = false;
+  if (!els.cloudLayoutName.value.trim()) els.cloudLayoutName.value = defaultCloudLayoutName();
+  refreshCloudLayouts();
+}
+
+function closeCloudLayouts() {
+  els.cloudLayouts.hidden = true;
+}
+
+function setCloudStatus(message, isError = false) {
+  els.cloudLayoutStatus.textContent = message;
+  els.cloudLayoutStatus.style.color = isError ? "#bb2f3a" : "";
+}
+
+async function saveCloudLayout() {
+  const name = els.cloudLayoutName.value.trim();
+  if (!name) {
+    setCloudStatus("名前を入力してください。", true);
+    els.cloudLayoutName.focus();
+    return;
+  }
+
+  setCloudStatus("保存中...");
+  try {
+    const saved = await apiJson("/api/layouts", {
+      method: "POST",
+      body: JSON.stringify(currentLayoutPayload(name)),
+    });
+    localStorage.setItem(cloudLayoutKey, saved.id);
+    els.cloudLayoutName.value = saved.name;
+    setCloudStatus("保存しました。");
+    await refreshCloudLayouts();
+  } catch (error) {
+    setCloudStatus(error.message || "保存できませんでした。", true);
+  }
+}
+
+async function refreshCloudLayouts() {
+  setCloudStatus("読み込み中...");
+  els.cloudLayoutList.replaceChildren();
+  try {
+    const data = await apiJson("/api/layouts");
+    renderCloudLayoutList(data.layouts || []);
+    setCloudStatus(data.layouts?.length ? `${data.layouts.length}件あります。` : "保存済みレイアウトはありません。");
+  } catch (error) {
+    setCloudStatus(error.message || "一覧を読み込めませんでした。", true);
+  }
+}
+
+function renderCloudLayoutList(layouts) {
+  els.cloudLayoutList.replaceChildren();
+  for (const layout of layouts) {
+    const card = div("cloud-layout-card");
+    const summary = div("cloud-layout-summary");
+    const title = document.createElement("strong");
+    title.textContent = layout.name || "無題";
+    const meta = document.createElement("span");
+    meta.textContent = `${layout.itemCount || 0} items / ${formatDateTime(layout.updatedAt)}`;
+    summary.append(title, meta);
+
+    const open = document.createElement("button");
+    open.className = "action-button";
+    open.type = "button";
+    open.textContent = "開く";
+    open.addEventListener("click", () => loadCloudLayout(layout.id));
+
+    const remove = document.createElement("button");
+    remove.className = "action-button danger";
+    remove.type = "button";
+    remove.textContent = "削除";
+    remove.addEventListener("click", () => deleteCloudLayout(layout));
+
+    card.append(summary, open, remove);
+    els.cloudLayoutList.append(card);
+  }
+}
+
+async function loadCloudLayout(id) {
+  if (!window.confirm("現在のレイアウトを保存済みデータで置き換えます。")) return;
+  setCloudStatus("開いています...");
+  try {
+    const loaded = await apiJson(`/api/layouts/${encodeURIComponent(id)}`);
+    const imported = normalizeState(loaded);
+    mutate(() => {
+      state = imported;
+      setSelection([]);
+      componentDraft = null;
+      selectionDraft = null;
+      wireDraft = null;
+      els.wirePanel.hidden = true;
+    });
+    localStorage.setItem(cloudLayoutKey, loaded.id);
+    els.cloudLayoutName.value = loaded.name || defaultCloudLayoutName();
+    setCloudStatus("開きました。");
+    closeCloudLayouts();
+  } catch (error) {
+    setCloudStatus(error.message || "開けませんでした。", true);
+  }
+}
+
+async function deleteCloudLayout(layout) {
+  if (!window.confirm(`「${layout.name || "無題"}」を削除します。`)) return;
+  setCloudStatus("削除中...");
+  try {
+    await apiJson(`/api/layouts/${encodeURIComponent(layout.id)}`, { method: "DELETE" });
+    if (localStorage.getItem(cloudLayoutKey) === layout.id) localStorage.removeItem(cloudLayoutKey);
+    setCloudStatus("削除しました。");
+    await refreshCloudLayouts();
+  } catch (error) {
+    setCloudStatus(error.message || "削除できませんでした。", true);
+  }
+}
+
+async function apiJson(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "通信に失敗しました。");
+  return data;
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat("ja-JP", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "-";
+  }
+}
+
 function exportConnectionsMarkdown() {
   const blob = new Blob([connectionListMarkdown()], {
     type: "text/markdown;charset=utf-8",
@@ -3194,6 +3360,10 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!els.cloudLayouts.hidden) {
+      if (event.key === "Escape") closeCloudLayouts();
+      return;
+    }
     if (!els.holeSettings.hidden) {
       if (event.key === "Escape") closeHoleSettings();
       return;
@@ -3261,6 +3431,13 @@ function bindEvents() {
   els.holeSettings.addEventListener("click", (event) => {
     if (event.target === els.holeSettings) closeHoleSettings();
   });
+  els.cloudLayoutsButton.addEventListener("click", openCloudLayouts);
+  els.closeCloudLayouts.addEventListener("click", closeCloudLayouts);
+  els.cloudLayouts.addEventListener("click", (event) => {
+    if (event.target === els.cloudLayouts) closeCloudLayouts();
+  });
+  els.saveCloudLayout.addEventListener("click", saveCloudLayout);
+  els.refreshCloudLayouts.addEventListener("click", refreshCloudLayouts);
   els.enableAllHoles.addEventListener("click", enableAllHoles);
   els.invertHoles.addEventListener("click", invertHoles);
   els.holeMaskCanvas.addEventListener("pointerdown", beginHoleMaskEdit);

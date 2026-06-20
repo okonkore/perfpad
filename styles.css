@@ -228,6 +228,26 @@ button:disabled {
   transform: rotate(225deg);
 }
 
+.cloud::before {
+  left: 3px;
+  top: 8px;
+  width: 12px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 8px;
+}
+
+.cloud::after {
+  left: 7px;
+  top: 4px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
 .text-file::before {
   inset: 2px 4px;
   border: 2px solid currentColor;
@@ -796,6 +816,79 @@ input[type="range"] {
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.cloud-dialog {
+  grid-template-rows: auto auto auto minmax(220px, 1fr);
+}
+
+.cloud-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cloud-save-row input {
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.cloud-layout-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cloud-layout-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cloud-layout-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cloud-layout-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cloud-layout-card strong,
+.cloud-layout-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-layout-card strong {
+  color: #263441;
+  font-size: 13px;
+}
+
+.cloud-layout-card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .statusbar {
