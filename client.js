@@ -161,6 +161,8 @@ let view = {
   cell: 24,
   originX: 80,
   originY: 80,
+  panX: 0,
+  panY: 0,
 };
 
 let state = {
@@ -185,6 +187,7 @@ let activeCanvasPointers = new Map();
 let pinchGesture = null;
 let holeMaskDrag = null;
 let holeMaskView = null;
+let spacePressed = false;
 let history = [];
 let future = [];
 let dirtyDuringDrag = false;
@@ -561,8 +564,8 @@ function updateView() {
   const maxCell = Number.POSITIVE_INFINITY;
   const baseCell = Math.min((view.width - edgePadding) / Math.max(cols, 1), (view.height - 96) / Math.max(rows, 1), 34);
   view.cell = clamp(baseCell * state.zoom, minCell, maxCell);
-  view.originX = Math.round((view.width - cols * view.cell) / 2);
-  view.originY = Math.round((view.height - rows * view.cell) / 2);
+  view.originX = Math.round((view.width - cols * view.cell) / 2 + view.panX);
+  view.originY = Math.round((view.height - rows * view.cell) / 2 + view.panY);
   if (view.width < 520) {
     view.originX = Math.min(view.originX, 32);
   }
@@ -623,8 +626,18 @@ function pinchDistance(points = currentPinchPoints()) {
   return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
 }
 
+function pinchCenter(points = currentPinchPoints()) {
+  if (points.length < 2) return null;
+  return {
+    x: (points[0].x + points[1].x) / 2,
+    y: (points[0].y + points[1].y) / 2,
+  };
+}
+
 function beginPinchGesture() {
-  const distance = pinchDistance();
+  const points = currentPinchPoints();
+  const distance = pinchDistance(points);
+  const center = pinchCenter(points);
   if (!distance) return;
   selectionDraft = null;
   componentDraft = null;
@@ -632,14 +645,23 @@ function beginPinchGesture() {
   dirtyDuringDrag = false;
   pinchGesture = {
     startDistance: distance,
+    startCenter: center,
+    startPanX: view.panX,
+    startPanY: view.panY,
     startZoom: state.zoom,
   };
 }
 
 function updatePinchGesture() {
   if (!pinchGesture || activeCanvasPointers.size < 2) return false;
-  const distance = pinchDistance();
+  const points = currentPinchPoints();
+  const distance = pinchDistance(points);
+  const center = pinchCenter(points);
   if (!distance) return false;
+  if (center && pinchGesture.startCenter) {
+    view.panX = pinchGesture.startPanX + center.x - pinchGesture.startCenter.x;
+    view.panY = pinchGesture.startPanY + center.y - pinchGesture.startCenter.y;
+  }
   const nextZoom = pinchGesture.startZoom * (distance / pinchGesture.startDistance);
   setZoom(nextZoom, { save: false });
   return true;
@@ -1803,6 +1825,19 @@ function pointerDown(event) {
   hoveredHole = hole;
   capturePointer(event.pointerId);
 
+  if ((event.pointerType === "mouse" || event.pointerType === "pen") && spacePressed) {
+    event.preventDefault();
+    selectionDraft = null;
+    componentDraft = null;
+    drag = {
+      kind: "pan",
+      startPoint: point,
+      startPanX: view.panX,
+      startPanY: view.panY,
+    };
+    return;
+  }
+
   if (currentTool === "select") {
     const hit = hitTest(point);
     if (!hit) {
@@ -1879,6 +1914,15 @@ function pointerMove(event) {
   }
 
   const point = eventPoint(event);
+
+  if (drag?.kind === "pan") {
+    event.preventDefault();
+    view.panX = drag.startPanX + point.x - drag.startPoint.x;
+    view.panY = drag.startPanY + point.y - drag.startPoint.y;
+    render();
+    return;
+  }
+
   hoveredHole = nearestHole(point);
   els.cursorStatus.textContent = `x: ${hoveredHole.x}, y: ${hoveredHole.y}`;
 
@@ -1952,6 +1996,11 @@ function pointerUp(event) {
   }
 
   if (drag) {
+    if (drag.kind === "pan") {
+      drag = null;
+      render();
+      return;
+    }
     const shouldMergeWires = dirtyDuringDrag;
     const linkedWireIds = (drag.linkedWirePoints || []).map((link) => link.itemId);
     const mergeWireIds = drag.kind === "wirePoint" ? [drag.itemId] : [...drag.itemIds, ...linkedWireIds];
@@ -3400,6 +3449,11 @@ function bindEvents() {
       return;
     }
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      spacePressed = true;
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
       event.preventDefault();
       if (event.repeat) return;
@@ -3425,6 +3479,13 @@ function bindEvents() {
       if (item && item.type !== "wire" && item.type !== "cut" && item.type !== "label") {
         inspectorMutate(() => (item.rotation = normalizeRotation(item.rotation + 90)));
       }
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.code === "Space") {
+      event.preventDefault();
+      spacePressed = false;
     }
   });
 
