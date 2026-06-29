@@ -588,6 +588,25 @@ input[type="range"] {
   box-shadow: 8px 0 0 currentColor, 0 8px 0 currentColor, 8px 8px 0 currentColor;
 }
 
+.xh::before {
+  top: 4px;
+  left: 2px;
+  width: 14px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.xh::after {
+  top: 8px;
+  left: 5px;
+  width: 2px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 4px 0 0 currentColor, 8px 0 0 currentColor;
+}
+
 .text::before {
   top: 2px;
   left: 3px;

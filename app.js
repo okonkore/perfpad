@@ -27,7 +27,7 @@ Deno.serve(async (request) => {
   return new Response(body, {
     headers: {
       "content-type": entry.contentType,
-      "cache-control": entry.path === "index.html" ? "no-cache" : "public, max-age=3600",
+      "cache-control": "no-cache",
     },
   });
 });
@@ -170,8 +170,18 @@ async function debugKv() {
     kvAvailable: Boolean(kv),
     indexedLayoutCount: index.layouts?.length || 0,
     storedLayoutCount,
+    deploymentId: getEnv("DENO_DEPLOYMENT_ID"),
+    region: getEnv("DENO_REGION"),
     now: new Date().toISOString(),
   };
+}
+
+function getEnv(name) {
+  try {
+    return Deno.env.get(name) || null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeLayout(input) {

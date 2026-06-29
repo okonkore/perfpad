@@ -96,6 +96,7 @@ const componentColors = {
   led: "#ef4444",
   ic: "#222831",
   header: "#3b4754",
+  xh: "#f3f4f6",
   label: "#17202a",
 };
 const resistorStyles = {
@@ -148,11 +149,15 @@ const capacitorStyles = {
     highlight: "rgba(237, 247, 255, 0.38)",
   },
 };
-const spanPlacedTypes = new Set(["resistor", "capacitor", "led", "header"]);
+const xhStyles = {
+  straight: { label: "通常" },
+  rightAngle: { label: "L字" },
+};
+const spanPlacedTypes = new Set(["resistor", "capacitor", "led", "header", "xh"]);
 const displayModes = new Set(["on", "dim", "off"]);
 const displayTargets = new Set(["wires", "parts", "labels"]);
 const grabModes = new Set(["auto", "parts", "wires"]);
-const electricalComponentTypes = new Set(["resistor", "capacitor", "led", "ic", "header"]);
+const electricalComponentTypes = new Set(["resistor", "capacitor", "led", "ic", "header", "xh"]);
 
 let view = {
   width: 0,
@@ -334,6 +339,13 @@ function normalizeItem(item, board = state?.board) {
   if (item.type === "led") return { ...base, spacing: clamp(Number(item.spacing) || 2, 1, 8) };
   if (item.type === "ic") return { ...base, pins: clampEven(Number(item.pins) || 8, 6, 40), width: clamp(Number(item.width) || 3, 2, 8) };
   if (item.type === "header") return { ...base, count: clamp(Number(item.count) || 4, 1, 40) };
+  if (item.type === "xh") {
+    return {
+      ...base,
+      style: xhStyles[item.style] ? item.style : "straight",
+      count: clamp(Number(item.count) || 2, 2, 12),
+    };
+  }
   if (item.type === "label") return { ...base, text: String(item.text || "TP") };
   return null;
 }
@@ -358,7 +370,7 @@ function makeComponentFromSpan(type, start, end, options = {}) {
 
   if (type === "resistor") raw.length = span.distance;
   if (type === "capacitor" || type === "led") raw.spacing = span.distance;
-  if (type === "header") {
+  if (type === "header" || type === "xh") {
     raw.count = span.distance + 1;
     raw.value = `1x${raw.count}`;
   }
@@ -394,6 +406,7 @@ function componentSpan(type, start, end) {
 function defaultSpanDistance(type) {
   if (type === "resistor") return 3;
   if (type === "header") return 3;
+  if (type === "xh") return 1;
   return 2;
 }
 
@@ -402,7 +415,9 @@ function minSpanDistance(type) {
 }
 
 function maxSpanDistance(type) {
-  return type === "header" ? 39 : type === "resistor" ? 16 : 8;
+  if (type === "header") return 39;
+  if (type === "xh") return 11;
+  return type === "resistor" ? 16 : 8;
 }
 
 function uid(prefix) {
@@ -410,7 +425,7 @@ function uid(prefix) {
 }
 
 function defaultName(type) {
-  const prefixes = { resistor: "R", capacitor: "C", led: "D", ic: "U", header: "J", label: "TXT" };
+  const prefixes = { resistor: "R", capacitor: "C", led: "D", ic: "U", header: "J", xh: "J", label: "TXT" };
   const prefix = prefixes[type] || "X";
   const count = state?.items?.filter((item) => item.type === type).length || 0;
   return `${prefix}${count + 1}`;
@@ -423,6 +438,7 @@ function defaultValue(type) {
     led: "LED",
     ic: "DIP",
     header: "1x4",
+    xh: "XH",
     label: "",
   }[type] || "";
 }
@@ -981,6 +997,7 @@ function drawComponent(item, showSelection = true) {
   if (item.type === "led") drawLed(item);
   if (item.type === "ic") drawIc(item);
   if (item.type === "header") drawHeader(item);
+  if (item.type === "xh") drawXhConnector(item);
   if (item.type === "label") drawLabel(item);
   ctx.restore();
 
@@ -1198,6 +1215,49 @@ function drawHeader(item) {
     ctx.lineWidth = 0.04;
     ctx.stroke();
     drawPin(i, 0, "#f4c96b");
+  }
+}
+
+function drawXhConnector(item) {
+  const count = item.count;
+  const width = Math.max(1, count - 1);
+  const bodyX = -0.46;
+  const bodyY = -0.58;
+  const bodyWidth = width + 0.92;
+  const bodyHeight = 1.16;
+
+  roundedRect(ctx, bodyX, bodyY, bodyWidth, bodyHeight, 0.12);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+  ctx.strokeStyle = "#9ca3af";
+  ctx.lineWidth = 0.045;
+  ctx.stroke();
+
+  ctx.fillStyle = "#e5e7eb";
+  ctx.fillRect(bodyX + 0.12, bodyY + 0.15, bodyWidth - 0.24, 0.2);
+  ctx.fillStyle = "#d1d5db";
+  ctx.fillRect(bodyX + 0.14, bodyY + bodyHeight - 0.26, bodyWidth - 0.28, 0.1);
+
+  for (let i = 0; i < count; i += 1) {
+    roundedRect(ctx, i - 0.18, -0.2, 0.36, 0.4, 0.04);
+    ctx.fillStyle = "#f3f4f6";
+    ctx.fill();
+    ctx.strokeStyle = "#c7cdd5";
+    ctx.lineWidth = 0.03;
+    ctx.stroke();
+
+    if (item.style === "rightAngle") {
+      ctx.strokeStyle = "#b6bdc7";
+      ctx.lineWidth = 0.09;
+      line(i, 0, i, 0.78);
+      line(i, 0.78, i + 0.44, 0.78);
+    }
+
+    drawPin(i, 0, "#d8b55a");
+  }
+
+  if (item.style === "rightAngle") {
+    componentText("L", bodyX + bodyWidth - 0.2, bodyY + 0.26, "#6b7280", 0.22);
   }
 }
 
@@ -1435,6 +1495,7 @@ function itemLocalBounds(item) {
     return { minX: -0.6, minY: -0.7, maxX: item.width + 0.6, maxY: length + 0.7 };
   }
   if (item.type === "header") return { minX: -0.46, minY: -0.82, maxX: item.count - 0.54, maxY: 0.82 };
+  if (item.type === "xh") return { minX: -0.55, minY: -0.72, maxX: item.count - 0.45, maxY: item.style === "rightAngle" ? 1.0 : 0.72 };
   if (item.type === "label") {
     const textLength = Math.max(2, String(item.text || item.name || "TXT").length);
     return { minX: -0.1, minY: -0.55, maxX: textLength * 0.45, maxY: 0.55 };
@@ -1470,6 +1531,9 @@ function itemPins(item) {
     return pins;
   }
   if (item.type === "header") {
+    return Array.from({ length: item.count }, (_, index) => transformedPoint(item, { x: index, y: 0 }));
+  }
+  if (item.type === "xh") {
     return Array.from({ length: item.count }, (_, index) => transformedPoint(item, { x: index, y: 0 }));
   }
   return [{ x: item.x, y: item.y }];
@@ -1556,6 +1620,9 @@ function componentLocalPins(item) {
   if (item.type === "resistor") return numberedPins([{ x: 0, y: 0 }, { x: item.length, y: 0 }]);
   if (item.type === "capacitor" || item.type === "led") return numberedPins([{ x: 0, y: 0 }, { x: item.spacing, y: 0 }]);
   if (item.type === "header") {
+    return Array.from({ length: item.count }, (_, index) => ({ label: String(index + 1), local: { x: index, y: 0 } }));
+  }
+  if (item.type === "xh") {
     return Array.from({ length: item.count }, (_, index) => ({ label: String(index + 1), local: { x: index, y: 0 } }));
   }
   if (item.type === "ic") {
@@ -2613,6 +2680,10 @@ function componentInspector(item) {
     root.append(numberField("幅", item.width, 2, 8, (value) => (item.width = clamp(value, 2, 8))));
   }
   if (item.type === "header") root.append(numberField("ピン", item.count, 1, 40, (value) => (item.count = clamp(value, 1, 40))));
+  if (item.type === "xh") {
+    root.append(numberField("ピン", item.count, 2, 12, (value) => (item.count = clamp(value, 2, 12))));
+    root.append(selectField("外観", item.style, Object.keys(xhStyles), (value) => (item.style = value), styleLabels(xhStyles)));
+  }
   if (item.type === "led" || item.type === "label") {
     root.append(colorSwatches(item.color || componentColors[item.type], (value) => (item.color = value)));
   }
@@ -2792,6 +2863,7 @@ function typeName(type) {
     led: "LED",
     ic: "DIP IC",
     header: "ピンヘッダ",
+    xh: "XHコネクタ",
     label: "ラベル",
   }[type] || type;
 }
@@ -3119,6 +3191,7 @@ function componentKindName(item) {
 function componentStyleName(item) {
   if (item.type === "resistor") return (resistorStyles[item.style] || resistorStyles.carbon).label;
   if (item.type === "capacitor") return (capacitorStyles[item.style] || capacitorStyles.ceramic).label;
+  if (item.type === "xh") return (xhStyles[item.style] || xhStyles.straight).label;
   return "";
 }
 
