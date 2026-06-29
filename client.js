@@ -285,6 +285,35 @@ function parsePointKey(key) {
   return { x, y };
 }
 
+function componentStagingBounds(board = state.board) {
+  return {
+    minX: -board.cols,
+    minY: -board.rows,
+    maxX: board.cols * 2 - 1,
+    maxY: board.rows * 2 - 1,
+  };
+}
+
+function boardPointBounds(board = state.board) {
+  return {
+    minX: 0,
+    minY: 0,
+    maxX: board.cols - 1,
+    maxY: board.rows - 1,
+  };
+}
+
+function clampPointToBounds(point, bounds) {
+  return {
+    x: clamp(Math.round(Number(point.x) || 0), bounds.minX, bounds.maxX),
+    y: clamp(Math.round(Number(point.y) || 0), bounds.minY, bounds.maxY),
+  };
+}
+
+function clampComponentPoint(point, board = state.board) {
+  return clampPointToBounds(point, componentStagingBounds(board));
+}
+
 function normalizeItem(item, board = state?.board) {
   if (!item || typeof item !== "object" || !item.type) return null;
   if (item.type === "wire") {
@@ -315,8 +344,10 @@ function normalizeItem(item, board = state?.board) {
   const base = {
     id: item.id || uid(item.type),
     type: item.type,
-    x: clamp(Math.round(Number(item.x) || 0), 0, board.cols - 1),
-    y: clamp(Math.round(Number(item.y) || 0), 0, board.rows - 1),
+    ...clampPointToBounds(
+      { x: item.x, y: item.y },
+      electricalComponentTypes.has(item.type) ? componentStagingBounds(board) : boardPointBounds(board),
+    ),
     rotation: normalizeRotation(item.rotation),
     name: item.name || defaultName(item.type),
     value: item.value || defaultValue(item.type),
@@ -697,6 +728,12 @@ function nearestHole(screenPoint) {
   const distance = Math.hypot(screen.x - screenPoint.x, screen.y - screenPoint.y);
   const enabled = isHoleEnabled(x, y);
   return { x, y, screen, distance, enabled, inside: enabled && distance < view.cell * 0.65 };
+}
+
+function nearestStagingPoint(screenPoint) {
+  const raw = screenToGrid(screenPoint.x, screenPoint.y);
+  const point = clampComponentPoint(raw);
+  return { ...point, screen: gridToScreen(point.x, point.y), inside: true, enabled: true };
 }
 
 function render() {
@@ -1706,6 +1743,10 @@ function isHoleEnabled(x, y) {
   return !boardDisabledSet().has(pointKey({ x, y }));
 }
 
+function isBoardPoint(point) {
+  return point.x >= 0 && point.y >= 0 && point.x < state.board.cols && point.y < state.board.rows;
+}
+
 function isHoleDisabled(x, y) {
   return boardDisabledSet().has(pointKey({ x, y }));
 }
@@ -1714,8 +1755,12 @@ function itemUsesEnabledHoles(item) {
   if (!item) return false;
   if (item.type === "wire") return item.points.every((point) => isHoleEnabled(point.x, point.y));
   if (item.type === "cut" || item.type === "label") return isHoleEnabled(item.x, item.y);
-  if (isElectricalComponent(item)) return itemPins(item).every((pin) => isHoleEnabled(pin.x, pin.y));
+  if (isElectricalComponent(item)) return itemPins(item).every((pin) => !isBoardPoint(pin) || isHoleEnabled(pin.x, pin.y));
   return true;
+}
+
+function isOffboardPlaceableItem(item) {
+  return isElectricalComponent(item);
 }
 
 function setHoleDisabled(x, y, disabled) {
@@ -1889,6 +1934,7 @@ function pointerDown(event) {
 
   const point = eventPoint(event);
   const hole = nearestHole(point);
+  const stagingPoint = nearestStagingPoint(point);
   hoveredHole = hole;
   capturePointer(event.pointerId);
 
@@ -1932,7 +1978,7 @@ function pointerDown(event) {
       drag = {
         kind: "moveGroup",
         itemIds: selectedItems.map((item) => item.id),
-        startHole: { x: hole.x, y: hole.y },
+        startHole: { x: stagingPoint.x, y: stagingPoint.y },
         startItems: selectedItems.map(cloneItem),
         linkedWirePoints: linkedWirePointsForItems(selectedItems),
       };
@@ -2017,13 +2063,15 @@ function pointerMove(event) {
     dirtyDuringDrag = true;
   }
 
-  if (!hoveredHole.inside) {
+  const dragPoint = drag.kind === "moveGroup" ? nearestStagingPoint(point) : hoveredHole;
+
+  if (!dragPoint.inside) {
     render();
     return;
   }
 
-  const dx = hoveredHole.x - drag.startHole.x;
-  const dy = hoveredHole.y - drag.startHole.y;
+  const dx = dragPoint.x - drag.startHole.x;
+  const dy = dragPoint.y - drag.startHole.y;
 
   if (drag.kind === "moveGroup") {
     moveDraggedItems(dx, dy);
@@ -2036,7 +2084,7 @@ function pointerMove(event) {
   if (!item) return;
 
   if (drag.kind === "wirePoint") {
-    item.points[drag.pointIndex] = { x: hoveredHole.x, y: hoveredHole.y };
+    item.points[drag.pointIndex] = { x: dragPoint.x, y: dragPoint.y };
     save();
     render();
     return;
@@ -2123,7 +2171,9 @@ function moveDraggedItems(dx, dy) {
       item.y = startItem.y + delta.dy;
     }
   }
-  moveLinkedWirePoints(delta.dx, delta.dy);
+  if (canMoveLinkedWirePoints(delta.dx, delta.dy)) {
+    moveLinkedWirePoints(delta.dx, delta.dy);
+  }
   clampAllItems();
 }
 
@@ -2167,6 +2217,11 @@ function moveLinkedWirePoints(dx, dy) {
   }
 }
 
+function canMoveLinkedWirePoints(dx, dy) {
+  if (!drag?.linkedWirePoints?.length) return false;
+  return drag.linkedWirePoints.every((link) => isHoleEnabled(link.startPoint.x + dx, link.startPoint.y + dy));
+}
+
 function movedItem(item, dx, dy) {
   const clone = cloneItem(item);
   if (clone.type === "wire") {
@@ -2194,9 +2249,10 @@ function constrainedDragDelta(dx, dy) {
     }
   }
 
+  const bounds = drag.startItems.every(isOffboardPlaceableItem) ? componentStagingBounds() : boardPointBounds();
   return {
-    dx: clamp(dx, -minX, state.board.cols - 1 - maxX),
-    dy: clamp(dy, -minY, state.board.rows - 1 - maxY),
+    dx: clamp(dx, bounds.minX - minX, bounds.maxX - maxX),
+    dy: clamp(dy, bounds.minY - minY, bounds.maxY - maxY),
   };
 }
 
@@ -2411,8 +2467,10 @@ function clampItem(item) {
     }
     return;
   }
-  item.x = clamp(Math.round(item.x), 0, state.board.cols - 1);
-  item.y = clamp(Math.round(item.y), 0, state.board.rows - 1);
+  const bounds = isOffboardPlaceableItem(item) ? componentStagingBounds() : boardPointBounds();
+  const point = clampPointToBounds(item, bounds);
+  item.x = point.x;
+  item.y = point.y;
 }
 
 function updateStatus() {
@@ -2714,8 +2772,9 @@ function cutInspector(item) {
 
 function coordFields(item) {
   const pair = div("pair");
-  pair.append(numberField("x", item.x, 0, state.board.cols - 1, (value) => (item.x = clamp(value, 0, state.board.cols - 1))));
-  pair.append(numberField("y", item.y, 0, state.board.rows - 1, (value) => (item.y = clamp(value, 0, state.board.rows - 1))));
+  const bounds = isOffboardPlaceableItem(item) ? componentStagingBounds() : boardPointBounds();
+  pair.append(numberField("x", item.x, bounds.minX, bounds.maxX, (value) => (item.x = clamp(value, bounds.minX, bounds.maxX))));
+  pair.append(numberField("y", item.y, bounds.minY, bounds.maxY, (value) => (item.y = clamp(value, bounds.minY, bounds.maxY))));
   return pair;
 }
 
@@ -2840,8 +2899,9 @@ function duplicateItem(item) {
         y: clamp(point.y + 1, 0, state.board.rows - 1),
       }));
     } else {
-      clone.x = clamp(clone.x + 1, 0, state.board.cols - 1);
-      clone.y = clamp(clone.y + 1, 0, state.board.rows - 1);
+      const bounds = isOffboardPlaceableItem(clone) ? componentStagingBounds() : boardPointBounds();
+      clone.x = clamp(clone.x + 1, bounds.minX, bounds.maxX);
+      clone.y = clamp(clone.y + 1, bounds.minY, bounds.maxY);
     }
     state.items.push(clone);
     setSelection([clone.id]);
