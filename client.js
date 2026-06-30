@@ -1257,6 +1257,11 @@ function drawHeader(item) {
 }
 
 function drawXhConnector(item) {
+  if (item.style === "rightAngle") {
+    drawRightAngleXhConnector(item);
+    return;
+  }
+
   const count = item.count;
   const width = Math.max(1, count - 1);
   const bodyX = -0.46;
@@ -1284,19 +1289,93 @@ function drawXhConnector(item) {
     ctx.lineWidth = 0.03;
     ctx.stroke();
 
-    if (item.style === "rightAngle") {
-      ctx.strokeStyle = "#b6bdc7";
-      ctx.lineWidth = 0.09;
-      line(i, 0, i, 0.78);
-      line(i, 0.78, i + 0.44, 0.78);
-    }
+    drawPin(i, 0, "#d8b55a");
+  }
+}
+
+function drawRightAngleXhConnector(item) {
+  ctx.save();
+  const count = item.count;
+  const width = Math.max(1, count - 1);
+  const bodyX = -0.64;
+  const bodyY = 0.42;
+  const bodyWidth = width + 1.28;
+  const bodyHeight = 1.72;
+  const plastic = "#f8fafc";
+  const plasticShade = "#e7ebf1";
+  const plasticStroke = "#aeb6c2";
+
+  for (let i = 0; i < count; i += 1) {
+    ctx.strokeStyle = "#aeb6c0";
+    ctx.lineWidth = 0.16;
+    ctx.lineCap = "round";
+    line(i, 0, i, 0.72);
+
+    ctx.strokeStyle = "#f7dfad";
+    ctx.lineWidth = 0.06;
+    line(i - 0.04, 0.04, i - 0.04, 0.68);
+
+    roundedRect(ctx, i - 0.16, 0.54, 0.32, 0.34, 0.05);
+    ctx.fillStyle = "#c8ced7";
+    ctx.fill();
+    ctx.strokeStyle = "#747f8d";
+    ctx.lineWidth = 0.025;
+    ctx.stroke();
 
     drawPin(i, 0, "#d8b55a");
   }
 
-  if (item.style === "rightAngle") {
-    componentText("L", bodyX + bodyWidth - 0.2, bodyY + 0.26, "#6b7280", 0.22);
-  }
+  roundedRect(ctx, bodyX, bodyY, bodyWidth, bodyHeight, 0.13);
+  ctx.fillStyle = plastic;
+  ctx.fill();
+  ctx.strokeStyle = plasticStroke;
+  ctx.lineWidth = 0.045;
+  ctx.stroke();
+
+  roundedRect(ctx, bodyX - 0.28, bodyY - 0.04, 0.72, 0.34, 0.04);
+  ctx.fillStyle = plastic;
+  ctx.fill();
+  ctx.strokeStyle = plasticStroke;
+  ctx.lineWidth = 0.035;
+  ctx.stroke();
+
+  roundedRect(ctx, bodyX + bodyWidth - 0.44, bodyY - 0.04, 0.72, 0.34, 0.04);
+  ctx.fillStyle = plastic;
+  ctx.fill();
+  ctx.strokeStyle = plasticStroke;
+  ctx.lineWidth = 0.035;
+  ctx.stroke();
+
+  roundedRect(ctx, bodyX - 0.28, bodyY + bodyHeight - 0.3, 0.72, 0.34, 0.04);
+  ctx.fillStyle = plastic;
+  ctx.fill();
+  ctx.strokeStyle = plasticStroke;
+  ctx.lineWidth = 0.035;
+  ctx.stroke();
+
+  roundedRect(ctx, bodyX + bodyWidth - 0.44, bodyY + bodyHeight - 0.3, 0.72, 0.34, 0.04);
+  ctx.fillStyle = plastic;
+  ctx.fill();
+  ctx.strokeStyle = plasticStroke;
+  ctx.lineWidth = 0.035;
+  ctx.stroke();
+
+  roundedRect(ctx, bodyX + 0.16, bodyY + 0.42, bodyWidth - 0.32, 0.18, 0.04);
+  ctx.fillStyle = "#d7dce4";
+  ctx.fill();
+
+  roundedRect(ctx, bodyX + 0.16, bodyY + bodyHeight - 0.62, bodyWidth - 0.32, 0.18, 0.04);
+  ctx.fillStyle = "#d7dce4";
+  ctx.fill();
+
+  roundedRect(ctx, bodyX + bodyWidth * 0.34, bodyY + 0.62, bodyWidth * 0.32, 0.74, 0.05);
+  ctx.fillStyle = plasticShade;
+  ctx.fill();
+
+  roundedRect(ctx, bodyX + 0.13, bodyY + 0.1, bodyWidth - 0.26, 0.08, 0.03);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawLabel(item) {
@@ -1533,7 +1612,10 @@ function itemLocalBounds(item) {
     return { minX: -0.6, minY: -0.7, maxX: item.width + 0.6, maxY: length + 0.7 };
   }
   if (item.type === "header") return { minX: -0.46, minY: -0.82, maxX: item.count - 0.54, maxY: 0.82 };
-  if (item.type === "xh") return { minX: -0.55, minY: -0.72, maxX: item.count - 0.45, maxY: item.style === "rightAngle" ? 1.0 : 0.72 };
+  if (item.type === "xh") {
+    if (item.style === "rightAngle") return { minX: -0.92, minY: -0.72, maxX: item.count - 0.08, maxY: 2.2 };
+    return { minX: -0.55, minY: -0.72, maxX: item.count - 0.45, maxY: 0.72 };
+  }
   if (item.type === "label") {
     const textLength = Math.max(2, String(item.text || item.name || "TXT").length);
     return { minX: -0.1, minY: -0.55, maxX: textLength * 0.45, maxY: 0.55 };
