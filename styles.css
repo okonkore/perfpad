@@ -843,7 +843,7 @@ input[type="range"] {
 
 .cloud-save-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -1354,6 +1354,18 @@ input[type="range"] {
     height: min(640px, calc(100dvh - 20px));
     grid-template-rows: auto auto minmax(220px, 1fr);
     padding: 10px;
+  }
+
+  .cloud-dialog {
+    grid-template-rows: auto auto auto minmax(220px, 1fr);
+  }
+
+  .cloud-save-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cloud-save-row input {
+    grid-column: 1 / -1;
   }
 
   #holeMaskCanvas {

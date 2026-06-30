@@ -43,6 +43,7 @@ const els = {
   closeCloudLayouts: document.querySelector("#closeCloudLayoutsBtn"),
   cloudLayoutName: document.querySelector("#cloudLayoutName"),
   saveCloudLayout: document.querySelector("#saveCloudLayoutBtn"),
+  saveCloudLayoutAs: document.querySelector("#saveCloudLayoutAsBtn"),
   refreshCloudLayouts: document.querySelector("#refreshCloudLayoutsBtn"),
   cloudLayoutStatus: document.querySelector("#cloudLayoutStatus"),
   cloudLayoutList: document.querySelector("#cloudLayoutList"),
@@ -2964,6 +2965,7 @@ function defaultCloudLayoutName() {
 function openCloudLayouts() {
   els.cloudLayouts.hidden = false;
   if (!els.cloudLayoutName.value.trim()) els.cloudLayoutName.value = defaultCloudLayoutName();
+  els.saveCloudLayout.textContent = activeCloudLayoutId() ? "上書き保存" : "保存";
   refreshCloudLayouts();
 }
 
@@ -2981,6 +2983,19 @@ function setActiveCloudLayout(id, name) {
   localStorage.setItem(cloudLayoutKey, id);
   window.history.replaceState(null, "", cloudLayoutUrl(id));
   if (name) els.cloudLayoutName.value = name;
+  els.saveCloudLayout.textContent = "上書き保存";
+}
+
+function clearActiveCloudLayout() {
+  localStorage.removeItem(cloudLayoutKey);
+  const url = new URL(window.location.href);
+  url.searchParams.delete("layout");
+  window.history.replaceState(null, "", url.toString());
+  els.saveCloudLayout.textContent = "保存";
+}
+
+function activeCloudLayoutId() {
+  return new URLSearchParams(window.location.search).get("layout") || localStorage.getItem(cloudLayoutKey);
 }
 
 function setCloudStatus(message, isError = false) {
@@ -2989,6 +3004,12 @@ function setCloudStatus(message, isError = false) {
 }
 
 async function saveCloudLayout() {
+  const id = activeCloudLayoutId();
+  if (!id) {
+    await saveCloudLayoutAs();
+    return;
+  }
+
   const name = els.cloudLayoutName.value.trim();
   if (!name) {
     setCloudStatus("名前を入力してください。", true);
@@ -2996,27 +3017,51 @@ async function saveCloudLayout() {
     return;
   }
 
-  setCloudStatus("保存中...");
+  setCloudStatus("上書き保存中...");
+  try {
+    const saved = await apiJson(`/api/layouts/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(currentLayoutPayload(name)),
+    });
+    setActiveCloudLayout(saved.id, saved.name);
+    setCloudStatus("上書き保存しました。");
+    await refreshCloudLayouts({ keepStatus: true });
+  } catch (error) {
+    setCloudStatus(error.message || "上書き保存できませんでした。", true);
+  }
+}
+
+async function saveCloudLayoutAs() {
+  const name = els.cloudLayoutName.value.trim();
+  if (!name) {
+    setCloudStatus("名前を入力してください。", true);
+    els.cloudLayoutName.focus();
+    return;
+  }
+
+  setCloudStatus("名前を付けて保存中...");
   try {
     const saved = await apiJson("/api/layouts", {
       method: "POST",
       body: JSON.stringify(currentLayoutPayload(name)),
     });
     setActiveCloudLayout(saved.id, saved.name);
-    setCloudStatus("保存しました。このURLで別端末から開けます。");
-    await refreshCloudLayouts();
+    setCloudStatus("名前を付けて保存しました。");
+    await refreshCloudLayouts({ keepStatus: true });
   } catch (error) {
-    setCloudStatus(error.message || "保存できませんでした。", true);
+    setCloudStatus(error.message || "名前を付けて保存できませんでした。", true);
   }
 }
 
-async function refreshCloudLayouts() {
-  setCloudStatus("読み込み中...");
+async function refreshCloudLayouts(options = {}) {
+  if (!options.keepStatus) setCloudStatus("読み込み中...");
   els.cloudLayoutList.replaceChildren();
   try {
     const data = await apiJson("/api/layouts");
     renderCloudLayoutList(data.layouts || []);
-    setCloudStatus(data.layouts?.length ? `${data.layouts.length}件あります。` : "保存済みレイアウトはありません。");
+    if (!options.keepStatus) {
+      setCloudStatus(data.layouts?.length ? `${data.layouts.length}件あります。` : "保存済みレイアウトはありません。");
+    }
   } catch (error) {
     setCloudStatus(error.message || "一覧を読み込めませんでした。", true);
   }
@@ -3293,6 +3338,7 @@ function importJsonFile(file) {
         setSelection([]);
         componentDraft = null;
         selectionDraft = null;
+        clearActiveCloudLayout();
       });
     } catch (error) {
       window.alert("JSONを読み込めませんでした。");
@@ -3310,6 +3356,7 @@ function clearBoard() {
     componentDraft = null;
     selectionDraft = null;
     els.wirePanel.hidden = true;
+    clearActiveCloudLayout();
   });
 }
 
@@ -3662,6 +3709,7 @@ function bindEvents() {
     if (event.target === els.cloudLayouts) closeCloudLayouts();
   });
   els.saveCloudLayout.addEventListener("click", saveCloudLayout);
+  els.saveCloudLayoutAs.addEventListener("click", saveCloudLayoutAs);
   els.refreshCloudLayouts.addEventListener("click", refreshCloudLayouts);
   els.enableAllHoles.addEventListener("click", enableAllHoles);
   els.invertHoles.addEventListener("click", invertHoles);

@@ -29,7 +29,7 @@
           <button class="icon-button" id="exportJsonBtn" title="JSONを書き出す" aria-label="JSONを書き出す">
             <span class="icon download"></span>
           </button>
-          <button class="icon-button" id="cloudLayoutsBtn" title="サーバー保存を開く" aria-label="サーバー保存を開く">
+          <button class="icon-button" id="cloudLayoutsBtn" title="開く / 保存" aria-label="開く / 保存">
             <span class="icon cloud"></span>
           </button>
           <button class="icon-button" id="exportConnectionsBtn" title="接続リストを書き出す" aria-label="接続リストを書き出す">
@@ -201,12 +201,13 @@
     <div class="settings-overlay" id="cloudLayouts" role="dialog" aria-modal="true" aria-labelledby="cloudLayoutsTitle" hidden>
       <div class="settings-dialog cloud-dialog">
         <div class="settings-header">
-          <h2 id="cloudLayoutsTitle">保存したレイアウト</h2>
+          <h2 id="cloudLayoutsTitle">レイアウトを開く / 保存</h2>
           <button class="action-button" id="closeCloudLayoutsBtn" type="button">閉じる</button>
         </div>
         <div class="cloud-save-row">
           <input id="cloudLayoutName" type="text" maxlength="80" placeholder="レイアウト名" />
-          <button class="action-button" id="saveCloudLayoutBtn" type="button">保存</button>
+          <button class="action-button" id="saveCloudLayoutBtn" type="button">上書き保存</button>
+          <button class="action-button" id="saveCloudLayoutAsBtn" type="button">名前を付けて保存</button>
           <button class="action-button" id="refreshCloudLayoutsBtn" type="button">更新</button>
         </div>
         <div id="cloudLayoutStatus" class="cloud-layout-status"></div>
@@ -214,6 +215,6 @@
       </div>
     </div>
 
-    <script src="./client.js?v=20260627-pan"></script>
+    <script src="./client.js?v=20260630-save-flow"></script>
   </body>
 </html>
