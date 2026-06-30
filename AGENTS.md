@@ -35,6 +35,26 @@ $env:GH_CONFIG_DIR = "C:\Users\okonkore\Documents\PerfPad\.codex-gh-auth"
 & "C:\Program Files\Git\bin\bash.exe" -lc 'git --git-dir=.codex-git-work --work-tree=. push -v origin main'
 ```
 
+If the Codex-specific GitHub token is invalid, ask the user to re-authenticate
+with HTTPS. The user may authenticate either with the Codex-specific
+`GH_CONFIG_DIR` above or with their normal GitHub CLI keyring. If the normal
+keyring is used, omit `GH_CONFIG_DIR` and push from Git Bash with terminal
+prompts disabled:
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" -lc 'GIT_TERMINAL_PROMPT=0 git --git-dir=.codex-git-work --work-tree=. push -v origin main'
+```
+
+If Codex sandboxing prevents the credential helper from reaching the user's
+keyring, rerun that same Git Bash push with escalated permissions. After a
+successful push, `.codex-git-work` may still have a stale `origin/main`
+tracking ref. Align it explicitly:
+
+```powershell
+git --git-dir=.codex-git-work --work-tree=. update-ref refs/remotes/origin/main main
+git --git-dir=.codex-git-work --work-tree=. rev-parse main origin/main
+```
+
 `.codex-git-work/` and `.codex-gh-auth/` are intentionally ignored. Do not
 commit them. `.codex-gh-auth/` contains local GitHub auth material.
 
