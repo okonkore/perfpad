@@ -338,6 +338,21 @@ function normalizeWireConnectPoints(value, board) {
   return normalized;
 }
 
+function ensureWirePointConnectPoints(points, connectPoints) {
+  const next = [...connectPoints];
+  for (const point of points) {
+    if (next.some((candidate) => samePoint(candidate, point))) continue;
+    next.push({
+      id: uid("cp"),
+      x: point.x,
+      y: point.y,
+      nodeId: uid("node"),
+      pin: null,
+    });
+  }
+  return next;
+}
+
 function normalizeConnectedPin(pin) {
   if (!pin || typeof pin !== "object") return null;
   const pinIndex = Math.round(Number(pin.pinIndex));
@@ -355,7 +370,7 @@ function normalizeItem(item, board = state?.board) {
       }))
       .filter((point, index, list) => index === 0 || point.x !== list[index - 1].x || point.y !== list[index - 1].y);
     if (points.length < 2) return null;
-    const connectPoints = normalizeWireConnectPoints(item.connectPoints, board);
+    const connectPoints = ensureWirePointConnectPoints(points, normalizeWireConnectPoints(item.connectPoints, board));
     return {
       id: item.id || uid("wire"),
       type: "wire",
@@ -1867,18 +1882,20 @@ function addConnectionPointAt(point) {
 
   const wires = wiresAtPoint(point);
   if (!wires.length) return false;
-  if (wires.length < 2 && !pins.length) return false;
 
-  const nodeId = uid("node");
+  const shouldConnect = wires.length > 1 || Boolean(pins[0]);
+  const nodeId = shouldConnect ? uid("node") : null;
   const pin = pins[0] ? { itemId: pins[0].itemId, pinIndex: pins[0].pinIndex } : null;
   for (const wire of wires) {
     wire.connectPoints ||= [];
     const existing = existingConnectPointAt(wire, point);
     if (existing) {
-      existing.nodeId = nodeId;
-      existing.pin = pin;
+      if (shouldConnect) {
+        existing.nodeId = nodeId;
+        existing.pin = pin;
+      }
     } else {
-      wire.connectPoints.push({ id: uid("cp"), x: point.x, y: point.y, nodeId, pin });
+      wire.connectPoints.push({ id: uid("cp"), x: point.x, y: point.y, nodeId: nodeId || uid("node"), pin });
     }
     ensureWirePointAt(wire, point);
   }
@@ -2773,6 +2790,7 @@ function clampItem(item) {
       point.y = clamp(Math.round(point.y), 0, state.board.rows - 1);
       ensureWirePointAt(item, point);
     }
+    item.connectPoints = ensureWirePointConnectPoints(item.points, item.connectPoints || []);
     return;
   }
   const bounds = isOffboardPlaceableItem(item) ? componentStagingBounds() : boardPointBounds();
