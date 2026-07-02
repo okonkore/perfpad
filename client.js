@@ -184,6 +184,7 @@ let displayOptions = { wires: "on", parts: "dim", labels: "on" };
 let grabMode = "auto";
 let selectedId = null;
 let selectedIds = new Set();
+let selectedConnectPoint = null;
 let hoveredHole = null;
 let wireDraft = null;
 let componentDraft = null;
@@ -315,6 +316,35 @@ function clampComponentPoint(point, board = state.board) {
   return clampPointToBounds(point, componentStagingBounds(board));
 }
 
+function normalizeWireConnectPoints(value, board) {
+  const points = Array.isArray(value) ? value : [];
+  const normalized = [];
+  const seen = new Set();
+  for (const point of points) {
+    const x = clamp(Math.round(Number(point.x) || 0), 0, board.cols - 1);
+    const y = clamp(Math.round(Number(point.y) || 0), 0, board.rows - 1);
+    const id = point.id || uid("cp");
+    const key = id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      id,
+      x,
+      y,
+      nodeId: point.nodeId || uid("node"),
+      pin: normalizeConnectedPin(point.pin),
+    });
+  }
+  return normalized;
+}
+
+function normalizeConnectedPin(pin) {
+  if (!pin || typeof pin !== "object") return null;
+  const pinIndex = Math.round(Number(pin.pinIndex));
+  if (!pin.itemId || !Number.isFinite(pinIndex)) return null;
+  return { itemId: pin.itemId, pinIndex };
+}
+
 function normalizeItem(item, board = state?.board) {
   if (!item || typeof item !== "object" || !item.type) return null;
   if (item.type === "wire") {
@@ -325,6 +355,7 @@ function normalizeItem(item, board = state?.board) {
       }))
       .filter((point, index, list) => index === 0 || point.x !== list[index - 1].x || point.y !== list[index - 1].y);
     if (points.length < 2) return null;
+    const connectPoints = normalizeWireConnectPoints(item.connectPoints, board);
     return {
       id: item.id || uid("wire"),
       type: "wire",
@@ -332,6 +363,7 @@ function normalizeItem(item, board = state?.board) {
       color: item.color || wireColors[1],
       width: clamp(Number(item.width) || 2, 1, 5),
       points,
+      connectPoints,
     };
   }
   if (item.type === "cut") {
@@ -565,14 +597,26 @@ function setSelection(ids) {
   const validIds = ids.filter((id) => state.items.some((item) => item.id === id));
   selectedIds = new Set(validIds);
   selectedId = validIds.length ? validIds[validIds.length - 1] : null;
+  if (validIds.length || !ids.length) selectedConnectPoint = null;
 }
 
 function syncSelectionToItems() {
   setSelection([...selectedIds]);
+  if (selectedConnectPoint && !findConnectPoint(selectedConnectPoint.wireId, selectedConnectPoint.pointId)) {
+    selectedConnectPoint = null;
+  }
 }
 
 function selectItem(id) {
   setSelection(id ? [id] : []);
+  save();
+  render();
+}
+
+function selectConnectPoint(wireId, pointId) {
+  selectedIds = new Set();
+  selectedId = null;
+  selectedConnectPoint = findConnectPoint(wireId, pointId) ? { wireId, pointId } : null;
   save();
   render();
 }
@@ -941,7 +985,26 @@ function drawWire(wire, selected = false) {
     ctx.strokeStyle = "#ffffff";
     ctx.stroke();
   }
+  for (const point of wire.connectPoints || []) {
+    drawConnectPoint(wire, point);
+  }
   ctx.restore();
+}
+
+function drawConnectPoint(wire, point) {
+  const p = gridToScreen(point.x, point.y);
+  const selected = selectedConnectPoint?.wireId === wire.id && selectedConnectPoint?.pointId === point.id;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, Math.max(5.5, view.cell * 0.2), 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.lineWidth = selected ? 3 : 2;
+  ctx.strokeStyle = selected ? "#276ef1" : "#111827";
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, Math.max(2.5, view.cell * 0.08), 0, Math.PI * 2);
+  ctx.fillStyle = wire.color;
+  ctx.fill();
 }
 
 function traceWirePath(points) {
@@ -1680,26 +1743,29 @@ function buildConnectivity() {
     if (rootA !== rootB) parent.set(rootB, rootA);
   };
 
+  const pins = state.items.filter(isElectricalComponent).flatMap(componentPinEntries);
+  for (const pin of pins) addNode(pin.key);
+
   for (const wire of state.items.filter((item) => item.type === "wire")) {
-    let previousKey = null;
-    for (let index = 1; index < wire.points.length; index += 1) {
-      const holes = wireSegmentHoles(wire.points[index - 1], wire.points[index]);
-      for (const hole of holes) {
-        if (!isHoleEnabled(hole.x, hole.y)) {
-          previousKey = null;
-          continue;
-        }
-        const key = pointKey(hole);
-        addNode(key);
-        wireNodeKeys.add(key);
-        if (previousKey) union(previousKey, key);
-        previousKey = key;
+    let firstWireKey = null;
+    for (const point of wire.connectPoints || []) {
+      if (!isHoleEnabled(point.x, point.y)) continue;
+      const key = `wire:${wire.id}:${point.id}`;
+      addNode(key);
+      wireNodeKeys.add(key);
+      if (firstWireKey) union(firstWireKey, key);
+      firstWireKey ||= key;
+
+      const nodeKey = `node:${point.nodeId}`;
+      addNode(nodeKey);
+      union(key, nodeKey);
+
+      if (point.pin) {
+        const pin = pins.find((candidate) => candidate.itemId === point.pin.itemId && candidate.pinIndex === point.pin.pinIndex);
+        if (pin) union(key, pin.key);
       }
     }
   }
-
-  const pins = state.items.filter(isElectricalComponent).flatMap(componentPinEntries);
-  for (const pin of pins) addNode(pin.key);
 
   const pinsByRoot = new Map();
   for (const pin of pins) {
@@ -1731,7 +1797,7 @@ function componentPinEntries(item) {
       pinIndex: index,
       pinLabel: pin.label,
       point,
-      key: pointKey(point),
+      key: `pin:${item.id}:${index}`,
     };
   });
 }
@@ -1757,6 +1823,128 @@ function componentLocalPins(item) {
     return pins;
   }
   return [];
+}
+
+function findConnectPoint(wireId, pointId) {
+  const wire = state.items.find((item) => item.id === wireId && item.type === "wire");
+  const point = wire?.connectPoints?.find((candidate) => candidate.id === pointId) || null;
+  return point ? { wire, point } : null;
+}
+
+function connectPointLabel(selection = selectedConnectPoint) {
+  const found = selection && findConnectPoint(selection.wireId, selection.pointId);
+  if (!found) return "";
+  return `CP (${found.point.x}, ${found.point.y})`;
+}
+
+function pinKey(pin) {
+  return `${pin.itemId}:${pin.pinIndex}`;
+}
+
+function pinsAtPoint(point) {
+  return state.items
+    .filter(isElectricalComponent)
+    .flatMap(componentPinEntries)
+    .filter((pin) => samePoint(pin.point, point));
+}
+
+function wireHasPoint(wire, point) {
+  return wire.points.some((candidate) => samePoint(candidate, point))
+    || wire.points.slice(1).some((candidate, index) => wireSegmentHoles(wire.points[index], candidate).some((hole) => samePoint(hole, point)));
+}
+
+function wiresAtPoint(point) {
+  return state.items.filter((item) => item.type === "wire" && wireHasPoint(item, point));
+}
+
+function existingConnectPointAt(wire, point) {
+  return (wire.connectPoints || []).find((candidate) => samePoint(candidate, point)) || null;
+}
+
+function addConnectionPointAt(point) {
+  const pins = pinsAtPoint(point);
+  if (pins.length > 1) return false;
+
+  const wires = wiresAtPoint(point);
+  if (!wires.length) return false;
+  if (wires.length < 2 && !pins.length) return false;
+
+  const nodeId = uid("node");
+  const pin = pins[0] ? { itemId: pins[0].itemId, pinIndex: pins[0].pinIndex } : null;
+  for (const wire of wires) {
+    wire.connectPoints ||= [];
+    const existing = existingConnectPointAt(wire, point);
+    if (existing) {
+      existing.nodeId = nodeId;
+      existing.pin = pin;
+    } else {
+      wire.connectPoints.push({ id: uid("cp"), x: point.x, y: point.y, nodeId, pin });
+    }
+    ensureWirePointAt(wire, point);
+  }
+  return true;
+}
+
+function ensureWirePointAt(wire, point) {
+  const existingIndex = wire.points.findIndex((candidate) => samePoint(candidate, point));
+  if (existingIndex >= 0) return existingIndex;
+
+  for (let index = 1; index < wire.points.length; index += 1) {
+    const holes = wireSegmentHoles(wire.points[index - 1], wire.points[index]);
+    if (!holes.some((hole) => samePoint(hole, point))) continue;
+    wire.points.splice(index, 0, { x: point.x, y: point.y });
+    return index;
+  }
+  wire.points.push({ x: point.x, y: point.y });
+  return wire.points.length - 1;
+}
+
+function moveWireConnectPoint(wire, point, dx, dy) {
+  const from = { x: point.x, y: point.y };
+  const pointIndex = ensureWirePointAt(wire, from);
+  point.x = clamp(from.x + dx, 0, state.board.cols - 1);
+  point.y = clamp(from.y + dy, 0, state.board.rows - 1);
+  if (wire.points[pointIndex] && samePoint(wire.points[pointIndex], from)) {
+    wire.points[pointIndex] = { x: point.x, y: point.y };
+  }
+}
+
+function connectedPinItemsForNode(nodeId) {
+  const pins = new Map();
+  for (const wire of state.items.filter((item) => item.type === "wire")) {
+    for (const point of wire.connectPoints || []) {
+      if (point.nodeId !== nodeId || !point.pin) continue;
+      pins.set(pinKey(point.pin), point.pin);
+    }
+  }
+  return [...pins.values()];
+}
+
+function moveConnectionNode(nodeId, dx, dy) {
+  const movedItems = new Set();
+  for (const wire of state.items.filter((item) => item.type === "wire")) {
+    for (const point of wire.connectPoints || []) {
+      if (point.nodeId === nodeId) moveWireConnectPoint(wire, point, dx, dy);
+    }
+  }
+
+  for (const pin of connectedPinItemsForNode(nodeId)) {
+    const item = state.items.find((candidate) => candidate.id === pin.itemId && isElectricalComponent(candidate));
+    if (!item || movedItems.has(item.id)) continue;
+    item.x += dx;
+    item.y += dy;
+    movedItems.add(item.id);
+    moveConnectPointsForMovedItem(item.id, dx, dy, nodeId);
+  }
+}
+
+function moveConnectPointsForMovedItem(itemId, dx, dy, exceptNodeId = null) {
+  for (const wire of state.items.filter((item) => item.type === "wire")) {
+    for (const point of wire.connectPoints || []) {
+      if (!point.pin || point.pin.itemId !== itemId || point.nodeId === exceptNodeId) continue;
+      moveWireConnectPoint(wire, point, dx, dy);
+    }
+  }
 }
 
 function numberedPins(points) {
@@ -1836,10 +2024,37 @@ function isHoleDisabled(x, y) {
 
 function itemUsesEnabledHoles(item) {
   if (!item) return false;
-  if (item.type === "wire") return item.points.every((point) => isHoleEnabled(point.x, point.y));
+  if (item.type === "wire") {
+    return item.points.every((point) => isHoleEnabled(point.x, point.y))
+      && (item.connectPoints || []).every((point) => isHoleEnabled(point.x, point.y));
+  }
   if (item.type === "cut" || item.type === "label") return isHoleEnabled(item.x, item.y);
-  if (isElectricalComponent(item)) return itemPins(item).every((pin) => !isBoardPoint(pin) || isHoleEnabled(pin.x, pin.y));
+  if (isElectricalComponent(item)) {
+    return itemPins(item).every((pin) => !isBoardPoint(pin) || isHoleEnabled(pin.x, pin.y)) && !hasTerminalOverlap(item);
+  }
   return true;
+}
+
+function hasTerminalOverlap(candidate) {
+  const candidatePins = componentPinEntries(candidate).filter((pin) => isBoardPoint(pin.point));
+  if (!candidatePins.length) return false;
+  const candidateKeys = new Map();
+  for (const pin of candidatePins) {
+    const key = pointKey(pin.point);
+    if (candidateKeys.has(key)) return true;
+    candidateKeys.set(key, pin);
+  }
+
+  for (const item of state.items.filter((item) => item.id !== candidate.id && isElectricalComponent(item))) {
+    for (const pin of componentPinEntries(item)) {
+      if (candidateKeys.has(pointKey(pin.point))) return true;
+    }
+  }
+  return false;
+}
+
+function hasAnyTerminalOverlap() {
+  return state.items.filter(isElectricalComponent).some((item) => hasTerminalOverlap(item));
 }
 
 function isOffboardPlaceableItem(item) {
@@ -1864,6 +2079,7 @@ function setHoleDisabled(x, y, disabled) {
 function hitTest(screenPoint) {
   const candidates = [...state.items].reverse();
   const itemCandidates = [];
+  const connectPointCandidates = [];
   const wirePointCandidates = [];
   const wireSegmentCandidates = [];
   const gridPoint = screenToGrid(screenPoint.x, screenPoint.y);
@@ -1871,6 +2087,14 @@ function hitTest(screenPoint) {
   candidates.forEach((item, zIndex) => {
     if (!isItemDisplayEnabled(item)) return;
     if (item.type === "wire") {
+      for (const point of item.connectPoints || []) {
+        const p = gridToScreen(point.x, point.y);
+        const distance = Math.hypot(screenPoint.x - p.x, screenPoint.y - p.y);
+        if (distance <= Math.max(10, view.cell * 0.32)) {
+          connectPointCandidates.push({ kind: "connectPoint", item, pointId: point.id, distance, zIndex });
+        }
+      }
+
       for (let index = 0; index < item.points.length; index += 1) {
         const point = item.points[index];
         const p = gridToScreen(point.x, point.y);
@@ -1924,12 +2148,14 @@ function hitTest(screenPoint) {
   const byDistance = (a, b) => (a.distance === b.distance ? a.zIndex - b.zIndex : a.distance - b.distance);
 
   const wirePoint = [...wirePointCandidates].sort(bySelectionThenDistance)[0] || null;
+  const connectPoint = [...connectPointCandidates].sort(bySelectionThenDistance)[0] || null;
   const wireSegment = [...wireSegmentCandidates].sort(byDistance)[0] || null;
   const item = [...itemCandidates].sort(bySelectionThenLayer)[0] || null;
 
   if (grabMode === "parts") return item;
-  if (grabMode === "wires") return wirePoint || wireSegment;
+  if (grabMode === "wires") return connectPoint || wirePoint || wireSegment;
 
+  if (connectPoint) return connectPoint;
   const selectedWirePoint = wirePointCandidates
     .filter((candidate) => isSelected(candidate.item.id))
     .sort(bySelectionThenDistance)[0];
@@ -2037,8 +2263,27 @@ function pointerDown(event) {
   if (currentTool === "select") {
     const hit = hitTest(point);
     if (!hit) {
+      selectedConnectPoint = null;
+      setSelection([]);
+      save();
       selectionDraft = { start: point, current: point };
       drag = null;
+      return;
+    }
+
+    if (hit.kind === "connectPoint") {
+      selectConnectPoint(hit.item.id, hit.pointId);
+      const found = findConnectPoint(hit.item.id, hit.pointId);
+      drag = found
+        ? {
+            kind: "connectPoint",
+            wireId: hit.item.id,
+            pointId: hit.pointId,
+            nodeId: found.point.nodeId,
+            startHole: { x: hole.x, y: hole.y },
+          }
+        : null;
+      dirtyDuringDrag = false;
       return;
     }
 
@@ -2064,6 +2309,7 @@ function pointerDown(event) {
         startHole: { x: stagingPoint.x, y: stagingPoint.y },
         startItems: selectedItems.map(cloneItem),
         linkedWirePoints: linkedWirePointsForItems(selectedItems),
+        linkedConnectPoints: linkedConnectPointsForItems(selectedItems),
       };
     }
     dirtyDuringDrag = false;
@@ -2073,6 +2319,21 @@ function pointerDown(event) {
   if (!hole.inside) return;
   if (currentTool === "wire") {
     addWirePoint(hole);
+    return;
+  }
+  if (currentTool === "connect") {
+    mutate(() => {
+      const added = addConnectionPointAt({ x: hole.x, y: hole.y });
+      if (!added) return;
+      const first = wiresAtPoint({ x: hole.x, y: hole.y })
+        .map((wire) => ({ wire, point: existingConnectPointAt(wire, { x: hole.x, y: hole.y }) }))
+        .find((entry) => entry.point);
+      if (first) {
+        selectedIds = new Set();
+        selectedId = null;
+        selectedConnectPoint = { wireId: first.wire.id, pointId: first.point.id };
+      }
+    });
     return;
   }
   if (currentTool === "cut") {
@@ -2163,6 +2424,23 @@ function pointerMove(event) {
     return;
   }
 
+  if (drag.kind === "connectPoint") {
+    const stepDx = dx - (drag.lastDx || 0);
+    const stepDy = dy - (drag.lastDy || 0);
+    moveConnectionNode(drag.nodeId, stepDx, stepDy);
+    if (hasAnyTerminalOverlap()) {
+      moveConnectionNode(drag.nodeId, -stepDx, -stepDy);
+      render();
+      return;
+    }
+    drag.lastDx = dx;
+    drag.lastDy = dy;
+    clampAllItems();
+    save();
+    render();
+    return;
+  }
+
   const item = state.items.find((candidate) => candidate.id === drag.itemId);
   if (!item) return;
 
@@ -2199,9 +2477,9 @@ function pointerUp(event) {
       render();
       return;
     }
-    const shouldMergeWires = dirtyDuringDrag;
+    const shouldMergeWires = dirtyDuringDrag && drag.kind !== "connectPoint";
     const linkedWireIds = (drag.linkedWirePoints || []).map((link) => link.itemId);
-    const mergeWireIds = drag.kind === "wirePoint" ? [drag.itemId] : [...drag.itemIds, ...linkedWireIds];
+    const mergeWireIds = drag.kind === "wirePoint" ? [drag.itemId] : [...(drag.itemIds || []), ...linkedWireIds];
     drag = null;
     dirtyDuringDrag = false;
     if (shouldMergeWires) {
@@ -2249,14 +2527,17 @@ function moveDraggedItems(dx, dy) {
         x: point.x + delta.dx,
         y: point.y + delta.dy,
       }));
+      item.connectPoints = (startItem.connectPoints || []).map((point) => ({
+        ...point,
+        x: point.x + delta.dx,
+        y: point.y + delta.dy,
+      }));
     } else {
       item.x = startItem.x + delta.dx;
       item.y = startItem.y + delta.dy;
     }
   }
-  if (canMoveLinkedWirePoints(delta.dx, delta.dy)) {
-    moveLinkedWirePoints(delta.dx, delta.dy);
-  }
+  moveLinkedConnectPoints(delta.dx, delta.dy);
   clampAllItems();
 }
 
@@ -2288,6 +2569,40 @@ function linkedWirePointsForItems(items) {
   return links;
 }
 
+function linkedConnectPointsForItems(items) {
+  const movingIds = new Set(items.map((item) => item.id));
+  const pins = items.filter(isElectricalComponent).flatMap(componentPinEntries);
+  if (!pins.length) return [];
+  const pinKeys = new Set(pins.map((pin) => pinKey({ itemId: pin.itemId, pinIndex: pin.pinIndex })));
+
+  const links = [];
+  const seen = new Set();
+  for (const wire of state.items.filter((item) => item.type === "wire" && !movingIds.has(item.id))) {
+    for (const point of wire.connectPoints || []) {
+      if (!point.pin || !pinKeys.has(pinKey(point.pin))) continue;
+      const key = `${wire.id}:${point.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      links.push({
+        itemId: wire.id,
+        pointId: point.id,
+        startPoint: { x: point.x, y: point.y },
+      });
+    }
+  }
+  return links;
+}
+
+function moveLinkedConnectPoints(dx, dy) {
+  if (!drag?.linkedConnectPoints?.length) return;
+  for (const link of drag.linkedConnectPoints) {
+    const found = findConnectPoint(link.itemId, link.pointId);
+    if (!found) continue;
+    const target = { x: link.startPoint.x + dx, y: link.startPoint.y + dy };
+    moveWireConnectPoint(found.wire, found.point, target.x - found.point.x, target.y - found.point.y);
+  }
+}
+
 function moveLinkedWirePoints(dx, dy) {
   if (!drag?.linkedWirePoints?.length) return;
   for (const link of drag.linkedWirePoints) {
@@ -2309,6 +2624,7 @@ function movedItem(item, dx, dy) {
   const clone = cloneItem(item);
   if (clone.type === "wire") {
     clone.points = clone.points.map((point) => ({ x: point.x + dx, y: point.y + dy }));
+    clone.connectPoints = (clone.connectPoints || []).map((point) => ({ ...point, x: point.x + dx, y: point.y + dy }));
   } else {
     clone.x += dx;
     clone.y += dy;
@@ -2481,6 +2797,7 @@ function mergeTouchingWires(seedIds = null) {
         const survivor = chooseWireSurvivor(a, b, activeIds);
         const removed = survivor.id === a.id ? b : a;
         survivor.points = compactWirePoints(points);
+        survivor.connectPoints = [...(survivor.connectPoints || []), ...(removed.connectPoints || [])];
         state.items = state.items.filter((item) => item.id !== removed.id);
         replaceSelectionId(removed.id, survivor.id);
         if (activeIds) {
@@ -2548,6 +2865,11 @@ function clampItem(item) {
       point.x = clamp(Math.round(point.x), 0, state.board.cols - 1);
       point.y = clamp(Math.round(point.y), 0, state.board.rows - 1);
     }
+    for (const point of item.connectPoints || []) {
+      point.x = clamp(Math.round(point.x), 0, state.board.cols - 1);
+      point.y = clamp(Math.round(point.y), 0, state.board.rows - 1);
+      ensureWirePointAt(item, point);
+    }
     return;
   }
   const bounds = isOffboardPlaceableItem(item) ? componentStagingBounds() : boardPointBounds();
@@ -2562,6 +2884,11 @@ function updateStatus() {
   const cuts = state.items.filter((item) => item.type === "cut").length;
   els.layoutStatus.textContent = `${parts} parts / ${wires} wires / ${cuts} cuts`;
   const selected = getSelected();
+  if (!componentDraft && selectedConnectPoint) {
+    els.selectionStatus.textContent = connectPointLabel();
+    els.projectMeta.textContent = `${state.board.cols} x ${state.board.rows} holes / ${state.board.pitch} mm`;
+    return;
+  }
   if (componentDraft) {
     const span = componentSpan(componentDraft.type, componentDraft.start, componentDraft.end);
     els.selectionStatus.textContent = `配置中: ${typeName(componentDraft.type)} ${span.distance}穴`;
@@ -2620,6 +2947,10 @@ function updateInspector() {
   const selectedItems = getSelectedItems();
   const selected = getSelected();
   els.inspector.replaceChildren();
+  if (selectedConnectPoint) {
+    els.inspector.append(connectPointInspector(selectedConnectPoint));
+    return;
+  }
   if (selectedItems.length > 1) {
     els.inspector.append(multiSelectionInspector(selectedItems));
     return;
@@ -2835,6 +3166,45 @@ function componentInspector(item) {
   return root;
 }
 
+function connectPointInspector(selection) {
+  const found = findConnectPoint(selection.wireId, selection.pointId);
+  const root = div("field-stack");
+  if (!found) {
+    root.append(readonlyField("Type", "Connection point"));
+    return root;
+  }
+
+  root.append(readonlyField("Type", "Connection point"));
+  root.append(readonlyField("x", String(found.point.x)));
+  root.append(readonlyField("y", String(found.point.y)));
+  root.append(readonlyField("Wire points", String(connectPointsInNode(found.point.nodeId).length)));
+  root.append(readonlyField("Pin", formatConnectedPin(found.point.pin)));
+
+  const row = div("inspector-actions");
+  const remove = document.createElement("button");
+  remove.className = "action-button danger";
+  remove.type = "button";
+  remove.textContent = "Delete";
+  remove.addEventListener("click", () => deleteSelected());
+  row.append(remove);
+  root.append(row);
+  return root;
+}
+
+function connectPointsInNode(nodeId) {
+  return state.items
+    .filter((item) => item.type === "wire")
+    .flatMap((wire) => (wire.connectPoints || []).filter((point) => point.nodeId === nodeId).map((point) => ({ wire, point })));
+}
+
+function formatConnectedPin(pin) {
+  if (!pin) return "None";
+  const item = state.items.find((candidate) => candidate.id === pin.itemId);
+  if (!item) return "Missing";
+  const entry = componentPinEntries(item)[pin.pinIndex];
+  return `${componentDisplayName(item)}-${entry?.pinLabel || pin.pinIndex + 1}`;
+}
+
 function wireInspector(item) {
   const root = div("field-stack");
   root.append(readonlyField("種類", "配線"));
@@ -2981,6 +3351,7 @@ function duplicateItem(item) {
         x: clamp(point.x + 1, 0, state.board.cols - 1),
         y: clamp(point.y + 1, 0, state.board.rows - 1),
       }));
+      clone.connectPoints = [];
     } else {
       const bounds = isOffboardPlaceableItem(clone) ? componentStagingBounds() : boardPointBounds();
       clone.x = clamp(clone.x + 1, bounds.minX, bounds.maxX);
@@ -2992,6 +3363,16 @@ function duplicateItem(item) {
 }
 
 function deleteSelected() {
+  if (selectedConnectPoint) {
+    mutate(() => {
+      const found = findConnectPoint(selectedConnectPoint.wireId, selectedConnectPoint.pointId);
+      if (found) {
+        found.wire.connectPoints = (found.wire.connectPoints || []).filter((point) => point.id !== selectedConnectPoint.pointId);
+      }
+      selectedConnectPoint = null;
+    });
+    return;
+  }
   if (!selectedIds.size) return;
   mutate(() => {
     state.items = state.items.filter((item) => !selectedIds.has(item.id));
@@ -3452,6 +3833,23 @@ function setTool(tool) {
   render();
 }
 
+function ensureConnectToolButton() {
+  if (els.toolGrid.querySelector('[data-tool="connect"]')) return;
+  const wireButton = els.toolGrid.querySelector('[data-tool="wire"]');
+  const button = document.createElement("button");
+  button.className = "tool-button";
+  button.type = "button";
+  button.dataset.tool = "connect";
+  button.title = "Connection point";
+  button.ariaLabel = "Connection point";
+  const icon = document.createElement("span");
+  icon.className = "tool-icon connect";
+  const label = document.createElement("span");
+  label.textContent = "接続点";
+  button.append(icon, label);
+  wireButton?.after(button);
+}
+
 function setDisplayMode(target, mode) {
   if (!displayTargets.has(target) || !displayModes.has(mode)) return;
   displayOptions = { ...displayOptions, [target]: mode };
@@ -3750,6 +4148,8 @@ function bindEvents() {
       spacePressed = false;
     }
   });
+
+  ensureConnectToolButton();
 
   els.toolGrid.addEventListener("click", (event) => {
     const button = event.target.closest("[data-tool]");
