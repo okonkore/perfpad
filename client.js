@@ -157,7 +157,7 @@ const xhStyles = {
 const spanPlacedTypes = new Set(["resistor", "capacitor", "led", "header", "xh"]);
 const displayModes = new Set(["on", "dim", "off"]);
 const displayTargets = new Set(["wires", "parts", "labels"]);
-const grabModes = new Set(["auto", "parts", "wires"]);
+const grabModes = new Set(["auto", "parts", "connect"]);
 const electricalComponentTypes = new Set(["resistor", "capacitor", "led", "ic", "header", "xh"]);
 
 let view = {
@@ -594,7 +594,7 @@ function isSelected(id) {
 }
 
 function setSelection(ids) {
-  const validIds = ids.filter((id) => state.items.some((item) => item.id === id));
+  const validIds = ids.filter((id) => state.items.some((item) => item.id === id && item.type !== "wire"));
   selectedIds = new Set(validIds);
   selectedId = validIds.length ? validIds[validIds.length - 1] : null;
   if (validIds.length || !ids.length) selectedConnectPoint = null;
@@ -2080,8 +2080,6 @@ function hitTest(screenPoint) {
   const candidates = [...state.items].reverse();
   const itemCandidates = [];
   const connectPointCandidates = [];
-  const wirePointCandidates = [];
-  const wireSegmentCandidates = [];
   const gridPoint = screenToGrid(screenPoint.x, screenPoint.y);
 
   candidates.forEach((item, zIndex) => {
@@ -2092,24 +2090,6 @@ function hitTest(screenPoint) {
         const distance = Math.hypot(screenPoint.x - p.x, screenPoint.y - p.y);
         if (distance <= Math.max(10, view.cell * 0.32)) {
           connectPointCandidates.push({ kind: "connectPoint", item, pointId: point.id, distance, zIndex });
-        }
-      }
-
-      for (let index = 0; index < item.points.length; index += 1) {
-        const point = item.points[index];
-        const p = gridToScreen(point.x, point.y);
-        const distance = Math.hypot(screenPoint.x - p.x, screenPoint.y - p.y);
-        if (distance <= Math.max(8, view.cell * 0.25)) {
-          wirePointCandidates.push({ kind: "wirePoint", item, pointIndex: index, distance, zIndex });
-        }
-      }
-
-      for (let index = 1; index < item.points.length; index += 1) {
-        const a = gridToScreen(item.points[index - 1].x, item.points[index - 1].y);
-        const b = gridToScreen(item.points[index].x, item.points[index].y);
-        const distance = distanceToSegment(screenPoint, a, b);
-        if (distance <= Math.max(7, view.cell * 0.18)) {
-          wireSegmentCandidates.push({ kind: "wire", item, distance, zIndex });
         }
       }
       return;
@@ -2145,32 +2125,15 @@ function hitTest(screenPoint) {
     if (selectedDiff) return selectedDiff;
     return a.zIndex - b.zIndex;
   };
-  const byDistance = (a, b) => (a.distance === b.distance ? a.zIndex - b.zIndex : a.distance - b.distance);
 
-  const wirePoint = [...wirePointCandidates].sort(bySelectionThenDistance)[0] || null;
   const connectPoint = [...connectPointCandidates].sort(bySelectionThenDistance)[0] || null;
-  const wireSegment = [...wireSegmentCandidates].sort(byDistance)[0] || null;
   const item = [...itemCandidates].sort(bySelectionThenLayer)[0] || null;
 
   if (grabMode === "parts") return item;
-  if (grabMode === "wires") return connectPoint || wirePoint || wireSegment;
+  if (grabMode === "connect") return connectPoint;
 
   if (connectPoint) return connectPoint;
-  const selectedWirePoint = wirePointCandidates
-    .filter((candidate) => isSelected(candidate.item.id))
-    .sort(bySelectionThenDistance)[0];
-  if (selectedWirePoint) return selectedWirePoint;
-  return item || wirePoint || wireSegment;
-}
-
-function distanceToSegment(point, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  if (dx === 0 && dy === 0) return Math.hypot(point.x - a.x, point.y - a.y);
-  const t = clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy), 0, 1);
-  const x = a.x + t * dx;
-  const y = a.y + t * dy;
-  return Math.hypot(point.x - x, point.y - y);
+  return item;
 }
 
 function normalizeScreenRect(a, b) {
@@ -2229,7 +2192,9 @@ function itemScreenBounds(item) {
 }
 
 function itemIdsInSelectionRect(rect) {
-  return state.items.filter((item) => isItemDisplayEnabled(item) && rectsIntersect(rect, itemScreenBounds(item))).map((item) => item.id);
+  return state.items
+    .filter((item) => item.type !== "wire" && isItemDisplayEnabled(item) && rectsIntersect(rect, itemScreenBounds(item)))
+    .map((item) => item.id);
 }
 
 function pointerDown(event) {
@@ -2266,6 +2231,10 @@ function pointerDown(event) {
       selectedConnectPoint = null;
       setSelection([]);
       save();
+      if (grabMode === "connect") {
+        drag = null;
+        return;
+      }
       selectionDraft = { start: point, current: point };
       drag = null;
       return;
@@ -2295,23 +2264,13 @@ function pointerDown(event) {
     }
 
     const selectedItems = getSelectedItems();
-    if (hit.kind === "wirePoint" && selectedItems.length === 1) {
-      drag = {
-        kind: "wirePoint",
-        itemId: hit.item.id,
-        pointIndex: hit.pointIndex,
-        startHole: { x: hole.x, y: hole.y },
-      };
-    } else {
-      drag = {
-        kind: "moveGroup",
-        itemIds: selectedItems.map((item) => item.id),
-        startHole: { x: stagingPoint.x, y: stagingPoint.y },
-        startItems: selectedItems.map(cloneItem),
-        linkedWirePoints: linkedWirePointsForItems(selectedItems),
-        linkedConnectPoints: linkedConnectPointsForItems(selectedItems),
-      };
-    }
+    drag = {
+      kind: "moveGroup",
+      itemIds: selectedItems.map((item) => item.id),
+      startHole: { x: stagingPoint.x, y: stagingPoint.y },
+      startItems: selectedItems.map(cloneItem),
+      linkedConnectPoints: linkedConnectPointsForItems(selectedItems),
+    };
     dirtyDuringDrag = false;
     return;
   }
@@ -2441,15 +2400,6 @@ function pointerMove(event) {
     return;
   }
 
-  const item = state.items.find((candidate) => candidate.id === drag.itemId);
-  if (!item) return;
-
-  if (drag.kind === "wirePoint") {
-    item.points[drag.pointIndex] = { x: dragPoint.x, y: dragPoint.y };
-    save();
-    render();
-    return;
-  }
 }
 
 function pointerUp(event) {
@@ -2477,13 +2427,11 @@ function pointerUp(event) {
       render();
       return;
     }
-    const shouldMergeWires = dirtyDuringDrag && drag.kind !== "connectPoint";
-    const linkedWireIds = (drag.linkedWirePoints || []).map((link) => link.itemId);
-    const mergeWireIds = drag.kind === "wirePoint" ? [drag.itemId] : [...(drag.itemIds || []), ...linkedWireIds];
+    const shouldMergeWires = false;
     drag = null;
     dirtyDuringDrag = false;
     if (shouldMergeWires) {
-      finalizeWireTopology(mergeWireIds);
+      finalizeWireTopology();
     } else {
       dedupeWires();
     }
@@ -2541,34 +2489,6 @@ function moveDraggedItems(dx, dy) {
   clampAllItems();
 }
 
-function linkedWirePointsForItems(items) {
-  const movingIds = new Set(items.map((item) => item.id));
-  const pinKeys = new Set(
-    items
-      .filter(isElectricalComponent)
-      .flatMap((item) => itemPins(item))
-      .map(pointKey),
-  );
-  if (!pinKeys.size) return [];
-
-  const links = [];
-  const seen = new Set();
-  for (const wire of state.items.filter((item) => item.type === "wire" && !movingIds.has(item.id))) {
-    wire.points.forEach((point, pointIndex) => {
-      if (!pinKeys.has(pointKey(point))) return;
-      const key = `${wire.id}:${pointIndex}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      links.push({
-        itemId: wire.id,
-        pointIndex,
-        startPoint: { x: point.x, y: point.y },
-      });
-    });
-  }
-  return links;
-}
-
 function linkedConnectPointsForItems(items) {
   const movingIds = new Set(items.map((item) => item.id));
   const pins = items.filter(isElectricalComponent).flatMap(componentPinEntries);
@@ -2601,23 +2521,6 @@ function moveLinkedConnectPoints(dx, dy) {
     const target = { x: link.startPoint.x + dx, y: link.startPoint.y + dy };
     moveWireConnectPoint(found.wire, found.point, target.x - found.point.x, target.y - found.point.y);
   }
-}
-
-function moveLinkedWirePoints(dx, dy) {
-  if (!drag?.linkedWirePoints?.length) return;
-  for (const link of drag.linkedWirePoints) {
-    const wire = state.items.find((item) => item.id === link.itemId && item.type === "wire");
-    if (!wire?.points?.[link.pointIndex]) continue;
-    wire.points[link.pointIndex] = {
-      x: link.startPoint.x + dx,
-      y: link.startPoint.y + dy,
-    };
-  }
-}
-
-function canMoveLinkedWirePoints(dx, dy) {
-  if (!drag?.linkedWirePoints?.length) return false;
-  return drag.linkedWirePoints.every((link) => isHoleEnabled(link.startPoint.x + dx, link.startPoint.y + dy));
 }
 
 function movedItem(item, dx, dy) {
@@ -2960,10 +2863,6 @@ function updateInspector() {
     return;
   }
 
-  if (selected.type === "wire") {
-    els.inspector.append(wireInspector(selected));
-    return;
-  }
   if (selected.type === "cut") {
     els.inspector.append(cutInspector(selected));
     return;
@@ -3203,16 +3102,6 @@ function formatConnectedPin(pin) {
   if (!item) return "Missing";
   const entry = componentPinEntries(item)[pin.pinIndex];
   return `${componentDisplayName(item)}-${entry?.pinLabel || pin.pinIndex + 1}`;
-}
-
-function wireInspector(item) {
-  const root = div("field-stack");
-  root.append(readonlyField("種類", "配線"));
-  root.append(selectField("面", item.layer, ["top", "bottom"], (value) => (item.layer = value), { top: "部品面", bottom: "はんだ面" }));
-  root.append(numberField("太さ", item.width, 1, 5, (value) => (item.width = clamp(value, 1, 5))));
-  root.append(colorSwatches(item.color, (value) => (item.color = value)));
-  root.append(actionRow(item));
-  return root;
 }
 
 function cutInspector(item) {
@@ -3858,6 +3747,7 @@ function setDisplayMode(target, mode) {
 }
 
 function setGrabMode(mode) {
+  if (mode === "wires") mode = "connect";
   if (!grabModes.has(mode)) return;
   grabMode = mode;
   syncControls();
